@@ -1,4 +1,39 @@
 /** Shared totals + formatting (used by vanilla logic parity). */
+import { db, addDoc, collection, getDocs, orderBy, query, deleteDoc, doc } from "./firebase";
+
+export async function fetchFromFirebase(userId) {
+  if (!userId) return { expenses: [], transactions: [] };
+  try {
+    const expQ = query(collection(db, "users", userId, "expenses"), orderBy("date", "desc"));
+    const expSnap = await getDocs(expQ);
+    const expenses = [];
+    expSnap.forEach((doc) => { expenses.push({ id: doc.id, ...doc.data() }); });
+
+    const txQ = query(collection(db, "users", userId, "transactions"), orderBy("date", "desc"));
+    const txSnap = await getDocs(txQ);
+    const transactions = [];
+    txSnap.forEach((doc) => { transactions.push({ id: doc.id, ...doc.data() }); });
+
+    return { expenses, transactions };
+  } catch (error) {
+    console.error("Error fetching from Firebase:", error);
+    return { expenses: [], transactions: [] };
+  }
+}
+
+export async function saveToFirebase(userId, collectionName, data) {
+  if (!userId) return null;
+  try {
+    const docRef = await addDoc(collection(db, "users", userId, collectionName), {
+      ...data,
+      createdAt: new Date(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error("Firebase error:", error);
+    return null;
+  }
+}
 
 export function formatMoney(n) {
   return new Intl.NumberFormat("en-IN", {
@@ -117,3 +152,21 @@ export const initialData = {
     { id: "e3", name: "Courier", amount: 22.5, date: "2026-04-04" },
   ],
 };
+
+export async function clearFirebaseData(userId) {
+  if (!userId) return;
+  try {
+    const expQ = query(collection(db, "users", userId, "expenses"));
+    const expSnap = await getDocs(expQ);
+    const expDeletes = expSnap.docs.map(d => deleteDoc(d.ref));
+    
+    const txQ = query(collection(db, "users", userId, "transactions"));
+    const txSnap = await getDocs(txQ);
+    const txDeletes = txSnap.docs.map(d => deleteDoc(d.ref));
+    
+    await Promise.all([...expDeletes, ...txDeletes]);
+    console.log("Firebase data cleared for user", userId);
+  } catch (error) {
+    console.error("Error clearing Firebase data:", error);
+  }
+}

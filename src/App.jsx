@@ -1,7 +1,13 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
 import SummaryChart from "./SummaryChart.jsx";
 import ExpenseCalendar, { CalendarDayPanel } from "./ExpenseCalendar.jsx";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { auth } from "./firebase";
+import Login from "./Login.jsx";
 import {
+  saveToFirebase,
+  fetchFromFirebase,
+  clearFirebaseData,
   computeTotals,
   formatMoney,
   formatDateDisplay,
@@ -42,11 +48,24 @@ function firstDateOfMonth(monthKey) {
 }
 
 export default function App() {
-  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
-  const [senders] = useState(() => withDate(initialData.senders, todayISO));
-  const [transactions, setTransactions] = useState(() => withDate(initialData.transactions, todayISO));
-  const [expenses, setExpenses] = useState(() => withDate(initialData.expenses, todayISO));
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+    });
+    return unsub;
+  }, []);
+
+  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
+  const [theme, setTheme] = useState(localStorage.getItem("theme") || "light");
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+
+  const [senders, setSenders] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [expenses, setExpenses] = useState([]);
 
   const [balanceInput, setBalanceInput] = useState("");
   const [balanceDate, setBalanceDate] = useState(todayISO);
@@ -64,6 +83,10 @@ export default function App() {
 
   const [activeNav, setActiveNav] = useState("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
+  
+  const [activeModal, setActiveModal] = useState(null); // 'transactions' | 'expenses'
+  const [activeDropdown, setActiveDropdown] = useState(null); // 'transactions' | 'expenses'
+  const [modalSearch, setModalSearch] = useState("");
 
   const calMonth = useMemo(() => dateFromMonthKey(selectedMonth), [selectedMonth]);
   const selectedMonthLabel = useMemo(() => formatMonthYear(calMonth), [calMonth]);
@@ -135,6 +158,30 @@ export default function App() {
     }
   }, [selectedMonth, selectedDate]);
 
+  useEffect(() => {
+    async function loadData() {
+      if (!user) {
+        setTransactions([]);
+        setExpenses([]);
+        setSenders([]);
+        return;
+      }
+      console.log("Syncing with cloud...");
+      const cloudData = await fetchFromFirebase(user.uid);
+      if (cloudData) {
+        setTransactions(cloudData.transactions || []);
+        setExpenses(cloudData.expenses || []);
+        console.log("Cloud sync complete!");
+      }
+    }
+    loadData();
+  }, [user]);
+
+  useEffect(() => {
+    document.body.className = theme !== "light" ? `theme-${theme}` : "";
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+
   const addBalance = useCallback(() => {
     const raw = parseFloat(balanceInput);
     if (Number.isNaN(raw) || raw <= 0) return;
@@ -150,7 +197,16 @@ export default function App() {
     ]);
     setBalanceInput("");
     setBalanceDate(selectedDate || todayISO());
-  }, [balanceInput, balanceDate, selectedDate]);
+
+    if (user) {
+      saveToFirebase(user.uid, "transactions", {
+        name: "Balance top-up",
+        type: "Credit",
+        amount: raw,
+        date: balanceDate || todayISO()
+      });
+    }
+  }, [balanceInput, balanceDate, selectedDate, user]);
 
   const onExpenseSubmit = useCallback(
     (e) => {
@@ -164,8 +220,16 @@ export default function App() {
       ]);
       setExpenseName("");
       setExpenseAmount("");
+
+      if (user) {
+        saveToFirebase(user.uid, "expenses", {
+          name,
+          amount: amt,
+          date: expenseDate || todayISO()
+        });
+      }
     },
-    [expenseName, expenseAmount, expenseDate]
+    [expenseName, expenseAmount, expenseDate, user]
   );
 
   const onTransactionSubmit = useCallback(
@@ -180,8 +244,17 @@ export default function App() {
       ]);
       setTransactionName("");
       setTransactionAmount("");
+
+      if (user) {
+        saveToFirebase(user.uid, "transactions", {
+          name,
+          type: transactionType,
+          amount: amt,
+          date: transactionDate || todayISO()
+        });
+      }
     },
-    [transactionName, transactionAmount, transactionType, transactionDate]
+    [transactionName, transactionAmount, transactionType, transactionDate, user]
   );
 
   const scrollTo = (section, navId) => {
@@ -189,6 +262,35 @@ export default function App() {
     document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
     setMenuOpen(false);
   };
+
+  const Modal = ({ isOpen, onClose, title, children }) => {
+    if (!isOpen) return null;
+    return (
+      <div className="modal-overlay is-open" onClick={onClose}>
+        <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
+          <header className="modal__header">
+            <h3 className="modal__title">{title}</h3>
+            <button type="button" className="modal__close" onClick={onClose}>&times;</button>
+          </header>
+          <div className="modal__body">
+            {children}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const handleResetData = async () => {
+    if (confirm("Are you sure you want to delete all your data? This cannot be undone.")) {
+      await clearFirebaseData(user.uid);
+      setTransactions([]);
+      setExpenses([]);
+      setSenders([]);
+    }
+  };
+
+  if (authLoading) return <div style={{padding: '2rem', textAlign: 'center'}}>Loading...</div>;
+  if (!user) return <Login />;
 
   return (
     <div className="app">
@@ -263,7 +365,7 @@ export default function App() {
             </a>
           ))}
         </nav>
-        <p className="sidebar__foot">React + Vite - demo data</p>
+        <p className="sidebar__foot">Expense Book - Live Sync</p>
       </aside>
 
       <button
@@ -287,6 +389,62 @@ export default function App() {
       />
 
       <main className="main">
+        <header className="main-header">
+          <div className="main-header__greeting">
+            <span className="greeting-prefix">Welcome back,</span>
+            <span className="user-name">{user?.displayName || user?.email?.split('@')[0] || "User"}!</span>
+          </div>
+
+          <div className="theme-switcher">
+            <button 
+              type="button" 
+              className="btn btn--outline" 
+              onClick={handleResetData} 
+              style={{marginRight: '0.5rem', border: '1px solid var(--debit, #ff5c5c)', background: 'transparent', color: 'var(--debit, #ff5c5c)', padding: '0.4rem 0.8rem', borderRadius: 'var(--radius-sm)'}}
+            >
+              Reset Data
+            </button>
+            <button 
+              type="button" 
+              className="btn btn--outline" 
+              onClick={() => signOut(auth)} 
+              style={{marginRight: '1rem', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', padding: '0.4rem 0.8rem', borderRadius: 'var(--radius-sm)'}}
+            >
+              Logout
+            </button>
+            <button 
+              type="button" 
+              className="theme-btn" 
+              onClick={() => setThemeMenuOpen(!themeMenuOpen)}
+            >
+              <span className={`theme-swatch theme-swatch--${theme}`}></span>
+              {theme.charAt(0).toUpperCase() + theme.slice(1)} Mode
+            </button>
+            {!themeMenuOpen ? null : (
+              <div className="theme-menu">
+                {[
+                  { id: "light", label: "Light Mode" },
+                  { id: "dark", label: "Dark Mode" },
+                  { id: "blue", label: "Blue Sky" },
+                  { id: "green", label: "Nature Green" },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    className="theme-option"
+                    onClick={() => {
+                      setTheme(t.id);
+                      setThemeMenuOpen(false);
+                    }}
+                  >
+                    <span className={`theme-swatch theme-swatch--${t.id}`}></span>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </header>
+
         <header className="top-bar">
           <div className="top-bar__balance card card--balance">
             <div className="top-bar__balance-label">
@@ -418,21 +576,47 @@ export default function App() {
 
           <div className="dashboard-row">
             <div className="card card--chart">
-              <h3 className="card__heading">Credit vs debit vs expenses ({selectedMonthLabel})</h3>
+              <h3 className="card__heading">Monthly summary ({selectedMonthLabel})</h3>
               <SummaryChart
-                totalCredit={monthlyTotals.totalCredit}
-                totalDebit={monthlyTotals.totalDebit}
-                totalExpenses={monthlyTotals.totalExpenses}
+                type="bar"
+                labels={["Credit", "Debit", "Expenses"]}
+                data={[
+                  monthlyTotals.totalCredit,
+                  monthlyTotals.totalDebit,
+                  monthlyTotals.totalExpenses,
+                ]}
+              />
+            </div>
+            <div className="card card--chart">
+              <h3 className="card__heading">Distribution ({selectedMonthLabel})</h3>
+              <SummaryChart
+                type="doughnut"
+                labels={["Credit", "Debit", "Expenses"]}
+                data={[
+                  monthlyTotals.totalCredit,
+                  monthlyTotals.totalDebit,
+                  monthlyTotals.totalExpenses,
+                ]}
               />
             </div>
             <div className="card card--recent">
-              <h3 className="card__heading">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
-                </svg>
-                Recent entries ({selectedMonthLabel})
-              </h3>
+              <div className="card__header-row" style={{ marginBottom: "0.5rem" }}>
+                <h3 className="card__heading">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: "6px" }}>
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  Recent entries ({selectedMonthLabel})
+                </h3>
+                <button 
+                  type="button" 
+                  className="btn--show-all" 
+                  onClick={() => setActiveModal('recent')}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                  Full View
+                </button>
+              </div>
               <ul className="recent-list">
                 {recentItems.length === 0 ? (
                   <li className="empty-state">No activity in this month.</li>
@@ -499,7 +683,17 @@ export default function App() {
             Money senders
           </h2>
           <div className="card">
-            <p className="card__lead">People who credited funds to your account in {selectedMonthLabel}</p>
+            <div className="card__header-row" style={{ marginBottom: "0.5rem" }}>
+              <p className="card__lead" style={{ margin: 0 }}>People who credited funds to your account in {selectedMonthLabel}</p>
+              <button 
+                type="button" 
+                className="btn--show-all" 
+                onClick={() => setActiveModal('senders')}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                Full View
+              </button>
+            </div>
             <p className="sender-summary">
               Total received from senders: <strong>{formatMoney(visibleMonthSenderTotal)}</strong>
             </p>
@@ -507,7 +701,7 @@ export default function App() {
               <p className="empty-state">No sender credits were recorded for {selectedMonthLabel}.</p>
             ) : (
               <ul className="sender-list">
-                {visibleMonthSenders.map((s) => (
+                {visibleMonthSenders.slice(0, 4).map((s) => (
                   <li key={s.id} className="sender-item">
                     <span className="sender-item__name">
                       <span className="sender-item__avatar">{initials(s.name)}</span>
@@ -592,6 +786,17 @@ export default function App() {
               </form>
             </div>
             <div className="card">
+              <div className="card__header-row">
+                <h3 className="card__heading">Your transactions ({selectedMonthLabel})</h3>
+                <button 
+                  type="button" 
+                  className="btn--show-all" 
+                  onClick={() => setActiveModal('transactions')}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                  Full View
+                </button>
+              </div>
               <div className="table-wrap">
                 <table className="data-table">
                   <thead>
@@ -603,30 +808,30 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                  {visibleMonthTransactions.length === 0 ? (
-                    <tr>
-                      <td colSpan="4" className="empty-state">
-                        No transactions for {selectedMonthLabel}.
-                      </td>
-                    </tr>
-                  ) : (
-                    visibleMonthTransactions.map((tx) => {
-                      const isCredit = tx.type === "Credit";
-                      return (
-                        <tr key={tx.id}>
-                          <td>{tx.name}</td>
-                          <td>{formatDateDisplay(tx.date)}</td>
-                          <td>
-                            <span className={`badge ${isCredit ? "badge--credit" : "badge--debit"}`}>{tx.type}</span>
-                          </td>
-                          <td className={`align-right ${isCredit ? "amount--credit" : "amount--debit"}`}>
-                            {formatMoney(tx.amount)}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
+                    {visibleMonthTransactions.length === 0 ? (
+                      <tr>
+                        <td colSpan="4" className="empty-state">
+                          No transactions for {selectedMonthLabel}.
+                        </td>
+                      </tr>
+                    ) : (
+                      visibleMonthTransactions.slice(0, 4).map((tx) => {
+                        const isCredit = tx.type === "Credit";
+                        return (
+                          <tr key={tx.id}>
+                            <td>{tx.name}</td>
+                            <td>{formatDateDisplay(tx.date)}</td>
+                            <td>
+                              <span className={`badge ${isCredit ? "badge--credit" : "badge--debit"}`}>{tx.type}</span>
+                            </td>
+                            <td className={`align-right ${isCredit ? "amount--credit" : "amount--debit"}`}>
+                              {formatMoney(tx.amount)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
                 </table>
               </div>
             </div>
@@ -689,7 +894,17 @@ export default function App() {
               </form>
             </div>
             <div className="card">
-              <h3 className="card__heading">Your expenses ({selectedMonthLabel})</h3>
+              <div className="card__header-row">
+                <h3 className="card__heading">Your expenses ({selectedMonthLabel})</h3>
+                <button 
+                  type="button" 
+                  className="btn--show-all" 
+                  onClick={() => setActiveModal('expenses')}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                  Full View
+                </button>
+              </div>
               <div className="form-row" style={{ marginBottom: "1rem" }}>
                 <input
                   type="text"
@@ -705,7 +920,7 @@ export default function App() {
                 {filteredMonthExpenses.length === 0 ? (
                   <li className="empty-state">No matching expenses found.</li>
                 ) : (
-                  filteredMonthExpenses.map((e) => (
+                  filteredMonthExpenses.slice(0, 4).map((e) => (
                     <li key={e.id} className="expense-item">
                       <span className="expense-item__name">
                         {e.name}
@@ -721,9 +936,105 @@ export default function App() {
         </section>
 
         <footer className="footer">
-          <p>Expense Book - Demo UI - All figures are illustrative</p>
+          <p>Expense Book - Professional Edition</p>
         </footer>
       </main>
+
+      <Modal 
+        isOpen={!!activeModal} 
+        onClose={() => { setActiveModal(null); setModalSearch(""); }}
+        title={`Full ${activeModal === 'transactions' ? 'Transactions' : activeModal === 'expenses' ? 'Expenses' : activeModal === 'senders' ? 'Money Senders' : 'Recent Entries'} (${selectedMonthLabel})`}
+      >
+        <div className="modal-search-row">
+          <input 
+            type="text" 
+            className="month-input modal-search-input" 
+            placeholder="Search entries..."
+            value={modalSearch}
+            onChange={(e) => setModalSearch(e.target.value)}
+          />
+          <span className="modal-expense-count">
+            {activeModal === 'transactions' ? visibleMonthTransactions.length : activeModal === 'expenses' ? visibleMonthExpenses.length : activeModal === 'senders' ? visibleMonthSenders.length : visibleMonthTransactions.length + visibleMonthExpenses.length} total
+          </span>
+        </div>
+        
+        {activeModal === 'transactions' && (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr><th>Name</th><th>Date</th><th>Type</th><th className="align-right">Amount</th></tr>
+              </thead>
+              <tbody>
+                {visibleMonthTransactions.filter(tx => tx.name.toLowerCase().includes(modalSearch.toLowerCase())).map((tx) => (
+                  <tr key={tx.id}>
+                    <td>{tx.name}</td>
+                    <td>{formatDateDisplay(tx.date)}</td>
+                    <td><span className={`badge ${tx.type === 'Credit' ? 'badge--credit' : 'badge--debit'}`}>{tx.type}</span></td>
+                    <td className={`align-right ${tx.type === 'Credit' ? 'amount--credit' : 'amount--debit'}`}>{formatMoney(tx.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeModal === 'expenses' && (
+          <ul className="expense-list">
+            {visibleMonthExpenses.filter(e => e.name.toLowerCase().includes(modalSearch.toLowerCase())).map((e) => (
+              <li key={e.id} className="expense-item">
+                <span className="expense-item__name">
+                  {e.name}
+                  <span className="expense-item__date">{formatDateDisplay(e.date)}</span>
+                </span>
+                <span className="expense-item__amount">{formatMoney(e.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        
+        {activeModal === 'senders' && (
+          <ul className="sender-list">
+            {visibleMonthSenders.filter(s => s.name.toLowerCase().includes(modalSearch.toLowerCase())).map((s) => (
+              <li key={s.id} className="sender-item">
+                <span className="sender-item__name">
+                  <span className="sender-item__avatar">{initials(s.name)}</span>
+                  <span className="sender-item__details">
+                    <span>{s.name}</span>
+                    <span className="sender-item__meta">{formatDateDisplay(s.date)}</span>
+                  </span>
+                </span>
+                <span className="sender-item__amount">{formatMoney(s.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {activeModal === 'recent' && (
+          <ul className="recent-list" style={{ maxHeight: 'none' }}>
+            {[
+              ...visibleMonthTransactions.map(tx => ({ ...tx, kind: 'tx', meta: tx.type })), 
+              ...visibleMonthExpenses.map(e => ({ ...e, kind: 'exp', meta: 'Expense' }))
+            ].sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+             .filter(item => item.name.toLowerCase().includes(modalSearch.toLowerCase()))
+             .map(item => {
+                const isCredit = item.type === "Credit";
+                const amountClass = isCredit ? "is-credit" : "is-debit";
+                const sign = isCredit ? "+" : "-";
+                return (
+                  <li key={item.id} className="recent-item">
+                    <div>
+                      <div className="recent-item__name">{item.name}</div>
+                      <div className="recent-item__meta">{item.meta} - {formatDateDisplay(item.date)}</div>
+                    </div>
+                    <span className={`recent-item__amount ${amountClass}`}>
+                      {sign}{formatMoney(item.amount)}
+                    </span>
+                  </li>
+                );
+             })}
+          </ul>
+        )}
+      </Modal>
     </div>
   );
 }
