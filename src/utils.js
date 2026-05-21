@@ -2,16 +2,19 @@
 import { db, addDoc, collection, getDocs, orderBy, query, deleteDoc, doc } from "./firebase";
 import { auth } from "./firebase";
 
-
+function getUidSafe(userId) {
+  return userId || auth?.currentUser?.uid || null;
+}
 
 export async function fetchFromFirebase(userId) {
-  if (!userId) return { expenses: [], transactions: [], receiverTransactions: [] };
+  const uid = getUidSafe(userId);
+  if (!uid) return { expenses: [], transactions: [], receiverTransactions: [] };
 
   // Merge localStorage pending entries so each collection survives refresh.
   const pendingKeys = ["transactions", "expenses", "receiverTransactions"];
   const pendingEntries = {};
   for (const key of pendingKeys) {
-    const lsKey = `pending_${userId}_${key}`;
+    const lsKey = `pending_${uid}_${key}`;
     const lsRaw = localStorage.getItem(lsKey);
     try {
       pendingEntries[key] = lsRaw ? JSON.parse(lsRaw) : [];
@@ -20,31 +23,38 @@ export async function fetchFromFirebase(userId) {
     }
   }
 
-
   try {
-    const expQ = query(collection(db, "users", userId, "expenses"), orderBy("date", "desc"));
+    const expQ = query(collection(db, "users", uid, "expenses"), orderBy("date", "desc"));
     const expSnap = await getDocs(expQ);
     const expenses = [];
     expSnap.forEach((doc) => {
       expenses.push({ id: doc.id, ...doc.data() });
     });
 
-    const txQ = query(collection(db, "users", userId, "transactions"), orderBy("date", "desc"));
+    const txQ = query(collection(db, "users", uid, "transactions"), orderBy("date", "desc"));
     const txSnap = await getDocs(txQ);
     const transactions = [];
     txSnap.forEach((doc) => {
       transactions.push({ id: doc.id, ...doc.data() });
     });
 
+    // Recovered runtime: receiver transactions used by dashboard metrics / insights.
+    const receiverTxQ = query(collection(db, "users", uid, "receiver_transactions"), orderBy("date", "desc"));
+    const receiverTxSnap = await getDocs(receiverTxQ);
     const receiverTransactions = [];
+    receiverTxSnap.forEach((doc) => {
+      receiverTransactions.push({ id: doc.id, ...doc.data() });
+    });
 
     // Prepend LS entries so UI shows immediately.
     return {
       expenses: [...(pendingEntries.expenses || []), ...expenses],
       transactions: [...(pendingEntries.transactions || []), ...transactions],
-      receiverTransactions: pendingEntries.receiverTransactions || receiverTransactions,
+      receiverTransactions: [
+        ...(pendingEntries.receiverTransactions || []),
+        ...receiverTransactions,
+      ],
     };
-
   } catch (error) {
     console.error("Error fetching from Firebase:", error);
     return {
@@ -54,6 +64,74 @@ export async function fetchFromFirebase(userId) {
     };
   }
 }
+
+export async function deleteFromFirebase(collectionName, docId, userId) {
+  const uid = getUidSafe(userId);
+  const finalId = docId;
+  if (!uid || !collectionName || !finalId) return;
+  await deleteDoc(doc(db, "users", uid, collectionName, finalId));
+}
+
+export async function testFirestoreConnection(userId) {
+  const uid = getUidSafe(userId);
+  if (!uid) return false;
+  try {
+    // Lightweight read: fetch 1 expense doc (or just attempt an empty query)
+    const q = query(collection(db, "users", uid, "expenses"), orderBy("date", "desc"));
+    const snap = await getDocs(q);
+    return !!snap;
+  } catch (e) {
+    console.error("Firestore connection test failed:", e);
+    return false;
+  }
+}
+
+export async function fetchDashboardMetrics(userId) {
+  const uid = getUidSafe(userId);
+  if (!uid) {
+    return {
+      totalCredit: 0,
+      totalDebit: 0,
+      totalExpenses: 0,
+      totalBalance: 0,
+      creditFromSenders: 0,
+      creditFromTx: 0,
+    };
+  }
+
+  const { transactions = [], expenses = [], receiverTransactions = [] } = await fetchFromFirebase(uid);
+
+  // Dashboard parity: receiver_transactions should count as debit (money sent).
+  // If receiver tx items have `amount` and `type`/`direction`, handle gracefully.
+  const receiverDebit = Array.isArray(receiverTransactions)
+    ? receiverTransactions.reduce((sum, rt) => {
+      const amt = Number(rt?.amount) || 0;
+      // Most recovered logic treats sent money as debit.
+      const type = rt?.type || rt?.direction;
+      if (type === "Credit" || type === "credit") return sum;
+      return sum + amt;
+    }, 0)
+    : 0;
+
+  const totalCredit = transactions.filter((t) => t.type === "Credit").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const totalDebitTx = transactions.filter((t) => t.type === "Debit").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const totalDebit = totalDebitTx + receiverDebit;
+  const totalExpenses = Array.isArray(expenses)
+    ? expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0)
+    : 0;
+
+  const totalBalance = totalCredit - totalDebit - totalExpenses;
+
+  return {
+    totalCredit,
+    totalDebit,
+    totalExpenses,
+    totalBalance,
+    creditFromSenders: 0,
+    creditFromTx: totalCredit,
+  };
+}
+
 
 
 
