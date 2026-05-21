@@ -1,39 +1,106 @@
 /** Shared totals + formatting (used by vanilla logic parity). */
 import { db, addDoc, collection, getDocs, orderBy, query, deleteDoc, doc } from "./firebase";
+import { auth } from "./firebase";
+
+
 
 export async function fetchFromFirebase(userId) {
-  if (!userId) return { expenses: [], transactions: [] };
+  if (!userId) return { expenses: [], transactions: [], receiverTransactions: [] };
+
+  // Merge localStorage pending entries so each collection survives refresh.
+  const pendingKeys = ["transactions", "expenses", "receiverTransactions"];
+  const pendingEntries = {};
+  for (const key of pendingKeys) {
+    const lsKey = `pending_${userId}_${key}`;
+    const lsRaw = localStorage.getItem(lsKey);
+    try {
+      pendingEntries[key] = lsRaw ? JSON.parse(lsRaw) : [];
+    } catch {
+      pendingEntries[key] = [];
+    }
+  }
+
+
   try {
     const expQ = query(collection(db, "users", userId, "expenses"), orderBy("date", "desc"));
     const expSnap = await getDocs(expQ);
     const expenses = [];
-    expSnap.forEach((doc) => { expenses.push({ id: doc.id, ...doc.data() }); });
+    expSnap.forEach((doc) => {
+      expenses.push({ id: doc.id, ...doc.data() });
+    });
 
     const txQ = query(collection(db, "users", userId, "transactions"), orderBy("date", "desc"));
     const txSnap = await getDocs(txQ);
     const transactions = [];
-    txSnap.forEach((doc) => { transactions.push({ id: doc.id, ...doc.data() }); });
+    txSnap.forEach((doc) => {
+      transactions.push({ id: doc.id, ...doc.data() });
+    });
 
-    return { expenses, transactions };
+    const receiverTransactions = [];
+
+    // Prepend LS entries so UI shows immediately.
+    return {
+      expenses: [...(pendingEntries.expenses || []), ...expenses],
+      transactions: [...(pendingEntries.transactions || []), ...transactions],
+      receiverTransactions: pendingEntries.receiverTransactions || receiverTransactions,
+    };
+
   } catch (error) {
     console.error("Error fetching from Firebase:", error);
-    return { expenses: [], transactions: [] };
+    return {
+      expenses: pendingEntries.expenses || [],
+      transactions: pendingEntries.transactions || [],
+      receiverTransactions: pendingEntries.receiverTransactions || [],
+    };
   }
 }
 
+
+
 export async function saveToFirebase(userId, collectionName, data) {
   if (!userId) return null;
+
+  const lsKey = `pending_${userId}_${collectionName}`;
+
+  // Ensure balance updates immediately even if Firebase write fails
+  const entry = {
+    id: `ls_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    ...data,
+    createdAt: new Date().toISOString(),
+  };
+
   try {
     const docRef = await addDoc(collection(db, "users", userId, collectionName), {
       ...data,
       createdAt: new Date(),
     });
+
+    // If Firebase succeeds, clear any staged local entry list
+    try {
+      localStorage.removeItem(lsKey);
+    } catch (_) { }
+
     return docRef.id;
   } catch (error) {
     console.error("Firebase error:", error);
-    return null;
+
+    // LocalStorage fallback
+    try {
+      const prevRaw = localStorage.getItem(lsKey);
+      const prev = prevRaw ? JSON.parse(prevRaw) : [];
+      const next = [entry, ...prev.filter((x) => x && x.id !== entry.id)];
+      localStorage.setItem(lsKey, JSON.stringify(next));
+    } catch (lsErr) {
+      console.error("localStorage fallback failed:", lsErr);
+      return null;
+    }
+
+    // Return local entry id so callers can continue
+    return entry.id;
   }
 }
+
+
 
 export function formatMoney(n) {
   return new Intl.NumberFormat("en-IN", {
@@ -159,11 +226,11 @@ export async function clearFirebaseData(userId) {
     const expQ = query(collection(db, "users", userId, "expenses"));
     const expSnap = await getDocs(expQ);
     const expDeletes = expSnap.docs.map(d => deleteDoc(d.ref));
-    
+
     const txQ = query(collection(db, "users", userId, "transactions"));
     const txSnap = await getDocs(txQ);
     const txDeletes = txSnap.docs.map(d => deleteDoc(d.ref));
-    
+
     await Promise.all([...expDeletes, ...txDeletes]);
     console.log("Firebase data cleared for user", userId);
   } catch (error) {
