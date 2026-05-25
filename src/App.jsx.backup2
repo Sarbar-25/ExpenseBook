@@ -583,23 +583,12 @@ export default function App() {
     }
   }, [selectedMonth, selectedDate]);
 
-  // Request ID counter for preventing stale async responses
-  const updateGlobalBalanceRequestId = useMemo(() => ({ current: 0 }), []);
-
   const updateGlobalBalance = useCallback(async () => {
     if (!user) return;
-
-    // Increment request ID to track this specific call
-    const requestId = ++updateGlobalBalanceRequestId.current;
 
     try {
       // Use the same cloud payload that drives dashboard lists to keep UI consistent.
       const cloudData = await fetchFromFirebase(user.uid);
-
-      // If a newer request was made, ignore this stale response
-      if (requestId !== updateGlobalBalanceRequestId.current) {
-        return;
-      }
 
       const tx = Array.isArray(cloudData?.transactions) ? cloudData.transactions : [];
       const ex = Array.isArray(cloudData?.expenses) ? cloudData.expenses : [];
@@ -693,10 +682,7 @@ export default function App() {
   }, [user, loadRawReceivers]);
 
 
-  // Separate effect: load raw data on user change (no metrics calculation)
   useEffect(() => {
-    let cancelled = false;
-
     async function loadData() {
       if (!user) {
         setSenders([]);
@@ -721,13 +707,13 @@ export default function App() {
 
       try {
         const cloudData = await fetchFromFirebase(user.uid);
-        if (cancelled) return;
         if (cloudData) {
           setSenders(Array.isArray(cloudData.senders) ? cloudData.senders : []);
           setReceivers(await loadRawReceivers(user.uid));
           setTransactions(cloudData.transactions || []);
           setExpenses(cloudData.expenses || []);
           setReceiverTransactions(cloudData.receiverTransactions || []);
+          await updateGlobalBalance();
         }
       } catch (error) {
         console.error("Error syncing with cloud:", error);
@@ -735,8 +721,7 @@ export default function App() {
     }
 
     loadData();
-    return () => { cancelled = true; };
-  }, [user]);
+  }, [user, updateGlobalBalance]);
 
   const addBalance = useCallback(async () => {
     const raw = parseFloat(balanceInput);

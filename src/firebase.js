@@ -1,22 +1,25 @@
-import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, getDocs, orderBy, query, deleteDoc, doc } from "firebase/firestore";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-    apiKey: "AIzaSyCygJMIszE2FfBH_ira102IcHmS_rlNiCg",
-    authDomain: "expensebook-edbdc.firebaseapp.com",
-    projectId: "expensebook-edbdc",
-    storageBucket: "expensebook-edbdc.firebasestorage.app",
-    messagingSenderId: "531241741670",
-    appId: "1:531241741670:web:fe185526db378b893e2ca7",
-    measurementId: "G-34141Y6QCK"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
-const app = initializeApp(firebaseConfig);
+const hasFirebaseConfig = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId);
 
-export const db = getFirestore(app);
-export const auth = getAuth(app);
-export const provider = new GoogleAuthProvider(); // ✅ FIXED
+const app = hasFirebaseConfig
+  ? (getApps().length ? getApp() : initializeApp(firebaseConfig))
+  : null;
 
-export { collection, addDoc, getDocs, orderBy, query, deleteDoc, doc };
+export const auth = app ? getAuth(app) : null;
+export const provider = app ? new GoogleAuthProvider() : null;
+export const db = app ? getFirestore(app) : null;
+export { app, firebaseConfig };
+export default app;

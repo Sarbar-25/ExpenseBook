@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { formatMoney, formatDateDisplay } from "./utils.js";
 
 /**
@@ -90,7 +90,7 @@ export default function ExpenseCalendar({
             </svg>
           </button>
         </div>
-        <p className="calendar-module__month-total">
+        <p className="calendar-module__month-total calendar-module__month-total--premium">
           This month: <strong>{formatMoney(monthExpenseTotal)}</strong>
         </p>
       </div>
@@ -117,9 +117,8 @@ export default function ExpenseCalendar({
                 key={cell.key}
                 type="button"
                 role="gridcell"
-                className={`calendar-cell calendar-cell--day${isToday ? " calendar-cell--today" : ""}${
-                  isSelected ? " calendar-cell--selected" : ""
-                }${hasExp ? " calendar-cell--has-expense" : ""}`}
+                className={`calendar-cell calendar-cell--day${isToday ? " calendar-cell--today" : ""}${isSelected ? " calendar-cell--selected" : ""
+                  }${hasExp ? " calendar-cell--has-expense" : ""}`}
                 onClick={() => onSelectDate(cell.dateStr)}
                 aria-pressed={isSelected}
                 aria-label={`${cell.day}, ${hasExp ? formatMoney(agg.total) + " spent" : "no expenses"}`}
@@ -137,13 +136,33 @@ export default function ExpenseCalendar({
 }
 
 /** Side panel: list expenses for one day */
-export function CalendarDayPanel({ selectedDate, expenses, onJumpToForm }) {
+export function CalendarDayPanel({ selectedDate, expenses, onJumpToForm, setExpenseDate }) {
+  const [calendarFilter, setCalendarFilter] = useState("selected");
+
   const list = useMemo(() => {
     if (!selectedDate) return [];
     return expenses.filter((e) => e.date === selectedDate);
   }, [selectedDate, expenses]);
 
-  const dayTotal = useMemo(() => list.reduce((a, e) => a + e.amount, 0), [list]);
+  const filteredList = useMemo(() => {
+    const today = new Date().toISOString().split("T")[0];
+    const yesterdayDate = new Date();
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterday = yesterdayDate.toISOString().split("T")[0];
+
+    if (calendarFilter === "today") {
+      return expenses.filter((e) => e.date === today);
+    }
+    if (calendarFilter === "yesterday") {
+      return expenses.filter((e) => e.date === yesterday);
+    }
+    if (calendarFilter === "all") {
+      return expenses;
+    }
+    return list;
+  }, [calendarFilter, expenses, list]);
+
+  const dayTotal = useMemo(() => filteredList.reduce((a, e) => a + e.amount, 0), [filteredList]);
 
   if (!selectedDate) {
     return (
@@ -154,30 +173,54 @@ export function CalendarDayPanel({ selectedDate, expenses, onJumpToForm }) {
   }
 
   return (
-    <div className="calendar-panel">
+    <div className="calendar-panel premium-glass-card">
       <div className="calendar-panel__header">
         <h4 className="calendar-panel__title">{formatDateDisplay(selectedDate)}</h4>
-        <p className="calendar-panel__sub">
-          Day total: <strong>{formatMoney(dayTotal)}</strong> - {list.length} item{list.length !== 1 ? "s" : ""}
+        <p className="calendar-panel__sub calendar-panel__sub--premium">
+          Day total: <strong>{formatMoney(dayTotal)}</strong> — {filteredList.length} item{filteredList.length !== 1 ? "s" : ""}
         </p>
-        {onJumpToForm && (
-          <button type="button" className="btn btn--ghost btn--small" onClick={onJumpToForm}>
-            Log expense for this day
+        {/* Replace quick date buttons */}
+        <div className="quick-date-buttons">
+          <button
+            type="button"
+            onClick={() => setCalendarFilter("today")}
+            className={`quick-date-btn ${calendarFilter === "today" ? "active" : ""}`}
+          >
+            Today
           </button>
-        )}
+
+          <button
+            type="button"
+            onClick={() => setCalendarFilter("yesterday")}
+            className={`quick-date-btn ${calendarFilter === "yesterday" ? "active" : ""}`}
+          >
+            Yesterday
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setCalendarFilter("all")}
+            className={`quick-date-btn ${calendarFilter === "all" ? "active" : ""}`}
+          >
+            Full View
+          </button>
+        </div>
+
       </div>
-      {list.length === 0 ? (
-        <p className="calendar-panel__empty">No expenses on this date.</p>
-      ) : (
-        <ul className="calendar-panel__list">
-          {list.map((e) => (
-            <li key={e.id} className="calendar-panel__item">
-              <span className="calendar-panel__name">{e.name}</span>
-              <span className="calendar-panel__amt">{formatMoney(e.amount)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+      {
+        filteredList.length === 0 ? (
+          <p className="calendar-panel__empty">No expenses on this date.</p>
+        ) : (
+          <ul className="calendar-panel__list">
+            {filteredList.map((e) => (
+              <li key={e.id} className="calendar-panel__item">
+                <span className="calendar-panel__name">{e.name}</span>
+                <span className="calendar-panel__amt">{formatMoney(e.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </div >
   );
 }
