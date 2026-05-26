@@ -124,55 +124,121 @@
 }
 
 [data-theme="dark"] {
-  --bg-primary: #0b1120;
+  /* Deep dark backgrounds - cinematic premium fintech */
+  --bg-primary: #020617;
   --bg-secondary: #111827;
-  --surface: #1e293b;
-  --surface-hover: #243449;
-  --surface-soft: rgba(255, 255, 255, 0.05);
+
+  /* Card backgrounds - higher contrast than page */
+  --surface: #111827;
+  --surface-hover: #1e293b;
+  --surface-soft: rgba(255, 255, 255, 0.035);
   --surface-solid: #f8fafc;
-  --card: #182235;
-  --card-soft: #1d2a3f;
+  --card: #111827;
+  --card-soft: #1e293b;
+
+  /* High contrast text */
   --text: #f8fafc;
   --text-muted: #94a3b8;
-  --border: rgba(148, 163, 184, 0.14);
-  --border-strong: rgba(148, 163, 184, 0.22);
-  --accent: #4f8cff;
-  --accent-hover: #67a2ff;
+  --text-secondary: #e2e8f0;
+
+  /* Borders - visible but subtle (avoid washed-out grays) */
+  --border: rgba(148, 163, 184, 0.18);
+  --border-strong: rgba(148, 163, 184, 0.26);
+
+  /* Accent - rich blue, not neon */
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
   --accent-strong: #3b82f6;
-  --accent-soft: rgba(59, 130, 246, 0.14);
-  --accent-ring: rgba(79, 140, 255, 0.2);
-  --accent-gradient: linear-gradient(135deg, #3b82f6 0%, #4f8cff 100%);
+  --accent-soft: rgba(59, 130, 246, 0.16);
+  --accent-ring: rgba(59, 130, 246, 0.28);
+  --accent-gradient: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   --accent-gradient-strong: linear-gradient(135deg, #2563eb 0%, #3b82f6 55%, #60a5fa 100%);
   --accent-gradient-alt: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
-  --hero-gradient: linear-gradient(135deg, rgba(37, 99, 235, 0.22), rgba(96, 165, 250, 0.12));
-  --hero-chip-bg: rgba(255, 255, 255, 0.08);
-  --hero-chip-border: rgba(148, 163, 184, 0.16);
-  --hero-glow-1: rgba(255, 255, 255, 0.08);
-  --hero-glow-2: rgba(96, 165, 250, 0.06);
-  --sidebar-bg: #111827;
-  --sidebar-text: #e2e8f0;
+
+  /* Hero/balance card - subtle, deep gradients */
+  --hero-gradient: linear-gradient(135deg, #0b1226 0%, #1e293b 100%);
+  --hero-chip-bg: rgba(59, 130, 246, 0.12);
+  --hero-chip-border: rgba(59, 130, 246, 0.22);
+  --hero-glow-1: rgba(59, 130, 246, 0.10);
+  --hero-glow-2: rgba(37, 99, 235, 0.07);
+
+  /* Sidebar - darker than cards, premium feel */
+  --sidebar-bg: #020617;
+  --sidebar-text: #f8fafc;
   --sidebar-active: #f8fafc;
-  --border-right: rgba(148, 163, 184, 0.12);
-  --shadow-color: rgba(2, 6, 23, 0.34);
-  --page-glow-1: rgba(59, 130, 246, 0.08);
-  --page-glow-2: rgba(59, 130, 246, 0.03);
-  --page-glow-3: rgba(59, 130, 246, 0.01);
+  --border-right: rgba(148, 163, 184, 0.18);
+
+  /* Shadows and glows - subtle, no white/bright halo */
+  --shadow-color: rgba(0, 0, 0, 0.25);
+  --page-glow-1: rgba(59, 130, 246, 0.045);
+  --page-glow-2: rgba(59, 130, 246, 0.02);
+  --page-glow-3: rgba(139, 92, 246, 0.015);
   --card-glow: rgba(59, 130, 246, 0.08);
-  --card-glow-strong: rgba(96, 165, 250, 0.12);
-  --focus-border: rgba(79, 140, 255, 0.5);
-  --focus-ring: rgba(79, 140, 255, 0.16);
-  --focus-ring-soft: rgba(79, 140, 255, 0.12);
-  --nav-hover-bg: rgba(255, 255, 255, 0.04);
-  --nav-hover-shadow: 0 10px 24px rgba(2, 6, 23, 0.18);
-  --nav-border: rgba(148, 163, 184, 0.08);
-  --panel-item-bg: rgba(255, 255, 255, 0.03);
-  --panel-item-hover: rgba(59, 130, 246, 0.06);
-  --panel-item-border: rgba(148, 163, 184, 0.08);
+  --card-glow-strong: rgba(59, 130, 246, 0.12);
+
+  /* Focus states - subtle glow */
+  --focus-border: rgba(59, 130, 246, 0.5);
+  --focus-ring: rgba(59, 130, 246, 0.18);
+  --focus-ring-soft: rgba(59, 130, 246, 0.12);
+
+  /* Navigation */
+  --nav-hover-bg: rgba(59, 130, 246, 0.08);
+  --nav-hover-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  --nav-border: rgba(148, 163, 184, 0.18);
+
+  /* Panel items */
+  --panel-item-bg: rgba(255, 255, 255, 0.02);
+  --panel-item-hover: rgba(59, 130, 246, 0.07);
+  --panel-item-border: rgba(148, 163, 184, 0.16);
+
+  /* Settings */
   --settings-accent-soft: rgba(59, 130, 246, 0.12);
-  --settings-accent-border: rgba(59, 130, 246, 0.1);
+  --settings-accent-border: rgba(59, 130, 246, 0.16);
   --settings-accent-text: #93c5fd;
-  --overlay-scrim: rgba(2, 6, 23, 0.6);
-  --profile-avatar-gradient: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%);
+
+  /* Danger zone */
+  --danger-surface: rgba(239, 68, 68, 0.08);
+  --danger-border: rgba(239, 68, 68, 0.18);
+  --danger-text: #f87171;
+
+  /* Overlay */
+  --overlay-scrim: rgba(2, 6, 23, 0.72);
+
+  /* Transaction colors - keep readable */
+  --credit: #34d399;
+  --credit-bg: rgba(52, 211, 153, 0.12);
+  --debit: #f87171;
+  --debit-bg: rgba(248, 113, 113, 0.12);
+
+  /* Status colors */
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, 0.12);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.12);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.12);
+  --info: #60a5fa;
+  --info-soft: rgba(96, 165, 250, 0.14);
+  --violet: #a78bfa;
+  --violet-soft: rgba(167, 139, 250, 0.14);
+
+  /* Chart colors */
+  --chart-grid: rgba(148, 163, 184, 0.10);
+  --chart-bar-1: rgba(52, 211, 153, 0.78);
+  --chart-bar-2: rgba(248, 113, 113, 0.78);
+  --chart-bar-3: rgba(96, 165, 250, 0.78);
+  --chart-pie-1: #34d399;
+  --chart-pie-2: #60a5fa;
+  --chart-pie-3: #fbbf24;
+  --chart-pie-4: #a78bfa;
+  --chart-pie-5: #f87171;
+
+  /* Skeleton loader */
+  --skeleton-base: rgba(148, 163, 184, 0.10);
+  --skeleton-shine: rgba(148, 163, 184, 0.16);
+
+  /* Avatar gradient */
+  --profile-avatar-gradient: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
 }
 
 [data-theme="blue"] {
@@ -479,6 +545,114 @@ body {
   transform: translateY(-1px) scale(1.03);
   border-color: var(--border-strong);
   box-shadow: var(--shadow-md);
+}
+
+/* Header notification (top-right) */
+.notif-wrap {
+  position: relative;
+}
+
+.notif-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 220px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 86%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-lg);
+  padding: 10px;
+  z-index: 200;
+
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.notif-dropdown.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.notif-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.notif-item:hover {
+  background: var(--card-soft);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.notif-item__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--accent);
+}
+
+[data-theme="dark"] .notif-item__icon {
+  background: rgba(59, 130, 246, 0.14);
+}
+
+
+.header-action--notification {
+  position: relative;
+}
+
+
+.header-action__icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -6px;
+  right: -7px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 20px rgba(244, 63, 94, 0.25);
+}
+
+.notification-badge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
 }
 
 .profile-chip {
@@ -939,6 +1113,7 @@ profile-chip__avatar {
 }
 
 @media (min-width: 901px) {
+
   html,
   body,
   #root {
@@ -3530,4 +3705,51 @@ profile-chip__avatar {
   .settings-card__title {
     font-size: 1rem;
   }
+}
+
+/* Ledger Card Top Row - Person Summary Card */
+.ledger-card-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 14px;
+}
+
+.ledger-user-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.person-summary-card__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.receive-money-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: #3b82f6;
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.receive-money-btn:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.receive-money-btn:active {
+  transform: translateY(0);
 }

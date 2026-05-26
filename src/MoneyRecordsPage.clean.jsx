@@ -163,7 +163,7 @@ export default function MoneyRecordsPageClean({ user, addToast }) {
                         </svg>
                     </div>
                     <h3>No senders added yet</h3>
-                    <p>Add a sender to start tracking received money.</p>
+                    <p>Add a sender to start tracking payments.</p>
                 </div>
             ) : (
                 <div className="records-grid">
@@ -174,7 +174,7 @@ export default function MoneyRecordsPageClean({ user, addToast }) {
                                     <div className="record-avatar sender">{getInitials(sender.name)}</div>
                                     <div>
                                         <h3 className="record-name">{sender.name}</h3>
-                                        <p className="record-subtitle">Money Received</p>
+                                        <p className="record-subtitle">Payment Received</p>
                                     </div>
                                 </div>
                             </div>

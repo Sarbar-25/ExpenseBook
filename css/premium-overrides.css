@@ -1,0 +1,145 @@
+/* PREMIUM FINTECH OVERRIDES - REFINED AND LIGHTWEIGHT */
+
+/* 1. Theme Variables (Colors, Shadows, Radius) */
+:root,
+[data-theme="light"],
+.light,
+body.light {
+  --bg-primary: #f8fafc !important;
+  --bg-secondary: #f1f5f9 !important;
+  
+  --surface: rgba(255, 255, 255, 0.95) !important;
+  --card: #ffffff !important;
+  
+  --text: #0f172a !important;
+  --text-muted: #64748b !important;
+  
+  --border: rgba(226, 232, 240, 0.8) !important;
+  
+  --shadow-sm: 0 2px 4px rgba(15, 23, 42, 0.02) !important;
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.04) !important;
+  --shadow-lg: 0 10px 25px rgba(15, 23, 42, 0.06) !important;
+  
+  --radius: 16px !important;
+  --radius-sm: 10px !important;
+  
+  --accent: #4f46e5 !important;
+  --accent-hover: #3b82f6 !important;
+}
+
+body, .app {
+  background-color: var(--bg-primary) !important;
+  color: var(--text) !important;
+  font-family: 'Inter', system-ui, sans-serif !important;
+}
+
+/* 2. Subtle Card Styling */
+.card, .summary-card, .table-container, .chart-container, .modal, .modal__body {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-md) !important;
+  border-radius: var(--radius) !important;
+  transition: box-shadow 0.2s ease !important;
+}
+
+.card:hover, .summary-card:hover {
+  box-shadow: var(--shadow-lg) !important;
+}
+
+/* 3. Hero Balance Card (Refined) */
+.card--balance, .top-bar__balance {
+  background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%) !important;
+  color: white !important;
+  box-shadow: 0 8px 20px rgba(79, 70, 229, 0.15) !important;
+  border: none !important;
+  border-radius: var(--radius) !important;
+}
+
+.card--balance *, .top-bar__balance * {
+  color: white !important;
+}
+
+/* 4. Sidebar */
+.sidebar {
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  border-right: 1px solid var(--border) !important;
+}
+
+.nav-link {
+  transition: all 0.2s ease !important;
+  border-radius: var(--radius-sm) !important;
+}
+
+.nav-link.is-active, .nav-link.active {
+  background: rgba(79, 70, 229, 0.08) !important;
+  color: var(--accent) !important;
+  border-left: 3px solid var(--accent) !important;
+  font-weight: 600 !important;
+}
+
+/* 5. Inputs & Forms */
+input, select, textarea, .input-group, .form-control {
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-sm) !important;
+  transition: all 0.2s ease !important;
+}
+
+input:focus, select:focus, textarea:focus, .input-group:focus-within {
+  border-color: rgba(79, 70, 229, 0.4) !important;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1) !important;
+  outline: none !important;
+}
+
+/* 6. Buttons */
+.btn, button {
+  border-radius: var(--radius-sm) !important;
+  transition: all 0.2s ease !important;
+}
+
+.btn--primary, .btn-primary {
+  background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%) !important;
+  color: white !important;
+  border: none !important;
+  box-shadow: 0 4px 10px rgba(79, 70, 229, 0.15) !important;
+}
+
+.btn--primary:hover, .btn-primary:hover {
+  box-shadow: 0 6px 15px rgba(79, 70, 229, 0.25) !important;
+}
+
+/* 7. Modal Enhancements */
+.modal-overlay {
+  background: rgba(15, 23, 42, 0.3) !important;
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+}
+
+/* 8. Summary Card Highlights */
+.summary-card {
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.summary-card::before {
+  content: '' !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 3px !important;
+  background: var(--accent) !important;
+  opacity: 0.8 !important;
+}
+
+.summary-card:nth-child(1)::before { background: #3b82f6 !important; }
+.summary-card:nth-child(2)::before { background: #10b981 !important; }
+.summary-card:nth-child(3)::before { background: #f59e0b !important; }
+.summary-card:nth-child(4)::before { background: #ec4899 !important; }
+.summary-card:nth-child(5)::before { background: #8b5cf6 !important; }
+
+/* 9. Typography overrides to keep modern feel */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text) !important;
+}

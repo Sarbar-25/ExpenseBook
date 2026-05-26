@@ -1,5 +1,9 @@
-import { useMemo, useState, useCallback, useEffect, memo } from "react";
+import { useMemo, useState, useCallback, useEffect, memo, useRef } from "react";
+import { Bell, UserRound, Wallet } from "lucide-react";
+
+
 import SummaryChart from "./SummaryChart.jsx";
+
 
 import ExpenseCalendar, { CalendarDayPanel } from "./ExpenseCalendar.jsx";
 import SettingsPage from "./SettingsPage.jsx";
@@ -261,6 +265,9 @@ export default function App() {
     applyThemeToDom(theme);
   }, [theme, applyThemeToDom]);
 
+  // (notification dropdown click-outside handler is declared after notificationOpen state below)
+
+
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -388,8 +395,31 @@ export default function App() {
 
   const [menuOpen, setMenuOpen] = useState(false);
 
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const notifWrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!notificationOpen) return;
+
+    const onDocDown = (e) => {
+      const el = notifWrapRef?.current;
+      if (!el) return;
+      if (!el.contains(e.target)) setNotificationOpen(false);
+    };
+
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("touchstart", onDocDown, { passive: true });
+
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("touchstart", onDocDown);
+    };
+  }, [notificationOpen]);
+
+
 
   const [activeModal, setActiveModal] = useState(null); // 'transactions' | 'expenses'
+
   const [activeDropdown, setActiveDropdown] = useState(null); // 'transactions' | 'expenses'
   const [modalSearch, setModalSearch] = useState("");
 
@@ -431,6 +461,7 @@ export default function App() {
   useEffect(() => {
     // Handle browser back/forward navigation
     const handlePopState = () => {
+
       if (typeof window === "undefined") return;
       const current = normalizeRoute(window.location.pathname || "/");
       setRoutePath(current);
@@ -587,17 +618,28 @@ export default function App() {
   const updateGlobalBalanceRequestId = useMemo(() => ({ current: 0 }), []);
 
   const updateGlobalBalance = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      console.log('[DIAGNOSTIC] updateGlobalBalance: No user, skipping');
+      return;
+    }
 
     // Increment request ID to track this specific call
     const requestId = ++updateGlobalBalanceRequestId.current;
+    console.log('[DIAGNOSTIC] updateGlobalBalance: Starting request #', requestId, 'for user', user.uid);
 
     try {
       // Use the same cloud payload that drives dashboard lists to keep UI consistent.
       const cloudData = await fetchFromFirebase(user.uid);
+      console.log('[DIAGNOSTIC] updateGlobalBalance: Firebase response for request #', requestId, {
+        sendersCount: cloudData?.senders?.length || 0,
+        transactionsCount: cloudData?.transactions?.length || 0,
+        expensesCount: cloudData?.expenses?.length || 0,
+        receiverTransactionsCount: cloudData?.receiverTransactions?.length || 0
+      });
 
       // If a newer request was made, ignore this stale response
       if (requestId !== updateGlobalBalanceRequestId.current) {
+        console.log('[DIAGNOSTIC] updateGlobalBalance: Request #', requestId, 'cancelled due to newer request');
         return;
       }
 
@@ -673,6 +715,20 @@ export default function App() {
       const netWorth =
         remainingBalance + Number(totalLentPending || 0) - Number(totalBorrowPending || 0);
 
+      console.log('[DIAGNOSTIC] updateGlobalBalance: Setting globalMetrics for request #', requestId, {
+        globalBalance: totals.totalBalance,
+        netWorth,
+        totalLentPending,
+        totalBorrowPending,
+        totalSentMoney: thisMonthSent,
+        totalReceivers,
+        thisMonthSent,
+        remainingBalance: totals.totalBalance,
+        totalSenderMoney: thisMonthReceived,
+        thisMonthReceived,
+        totalSenders
+      });
+
       setGlobalMetrics((prev) => ({
         ...prev,
         globalBalance: totals.totalBalance,
@@ -688,17 +744,19 @@ export default function App() {
         totalSenders,
       }));
     } catch (error) {
-      console.error("Error updating global balance:", error);
+      console.error("[DIAGNOSTIC] Error updating global balance:", error);
     }
   }, [user, loadRawReceivers]);
 
 
-  // Separate effect: load raw data on user change (no metrics calculation)
+  // Separate effect: load raw data on user change and calculate metrics
   useEffect(() => {
     let cancelled = false;
 
     async function loadData() {
+      console.log('[DIAGNOSTIC] loadData: user =', user?.uid || 'null', 'cancelled =', cancelled);
       if (!user) {
+        console.log('[DIAGNOSTIC] loadData: No user, resetting all state to empty');
         setSenders([]);
         setReceivers([]);
         setTransactions([]);
@@ -720,17 +778,126 @@ export default function App() {
       }
 
       try {
+        console.log('[DIAGNOSTIC] loadData: Fetching from Firebase for user', user.uid);
         const cloudData = await fetchFromFirebase(user.uid);
-        if (cancelled) return;
+        console.log('[DIAGNOSTIC] loadData: Firebase response:', {
+          sendersCount: cloudData?.senders?.length || 0,
+          transactionsCount: cloudData?.transactions?.length || 0,
+          expensesCount: cloudData?.expenses?.length || 0,
+          receiverTransactionsCount: cloudData?.receiverTransactions?.length || 0
+        });
+        if (cancelled) {
+          console.log('[DIAGNOSTIC] loadData: Request was cancelled, ignoring response');
+          return;
+        }
         if (cloudData) {
-          setSenders(Array.isArray(cloudData.senders) ? cloudData.senders : []);
-          setReceivers(await loadRawReceivers(user.uid));
-          setTransactions(cloudData.transactions || []);
-          setExpenses(cloudData.expenses || []);
-          setReceiverTransactions(cloudData.receiverTransactions || []);
+          const sendersData = Array.isArray(cloudData.senders) ? cloudData.senders : [];
+          const receiversData = await loadRawReceivers(user.uid);
+          const transactionsData = cloudData.transactions || [];
+          const expensesData = cloudData.expenses || [];
+          const receiverTransactionsData = cloudData.receiverTransactions || [];
+
+          console.log('[DIAGNOSTIC] loadData: Setting state with:', {
+            sendersCount: sendersData.length,
+            receiversCount: receiversData.length,
+            transactionsCount: transactionsData.length,
+            expensesCount: expensesData.length,
+            receiverTransactionsCount: receiverTransactionsData.length
+          });
+
+          setSenders(sendersData);
+          setReceivers(receiversData);
+          setTransactions(transactionsData);
+          setExpenses(expensesData);
+          setReceiverTransactions(receiverTransactionsData);
+
+          // Calculate and set globalMetrics from fetched data
+          console.log('[DIAGNOSTIC] loadData: Calculating globalMetrics from fetched data...');
+
+          // Receiver transactions are money sent out => treat them as DEBIT.
+          const rtAsDebits = receiverTransactionsData.map((r) => ({
+            id: r.id,
+            name: r.name || "Receiver Transaction",
+            type: "Debit",
+            amount: Number(r.amount) || 0,
+            date: r.date,
+          }));
+
+          const totals = computeTotals(
+            sendersData,
+            [...transactionsData, ...rtAsDebits],
+            expensesData
+          );
+
+          const monthKey = currentMonthKey();
+
+          const totalSenders = getUniqueSenderCount(sendersData);
+          const totalReceivers = getUniqueReceiverCount(receiversData);
+
+          // Pending totals from lendBorrow records
+          let totalLentPending = 0;
+          let totalBorrowPending = 0;
+          try {
+            const lbSnap = await getDocs(collection(db, "users", user.uid, "lendBorrow"));
+            const recordsRaw = [];
+            lbSnap.forEach((d) => recordsRaw.push({ id: d.id, ...d.data() }));
+            const records = recordsRaw.filter((item) => !item.userId || item.userId === user.uid);
+
+            records.forEach((r) => {
+              const amt = Number(r.amount) || 0;
+              const repaid = Array.isArray(r.repayments)
+                ? r.repayments.reduce((s, rep) => s + (Number(rep?.amount) || 0), 0)
+                : 0;
+              const remaining = amt - repaid;
+              if (remaining <= 0) return;
+
+              if (r.type === "lend") totalLentPending += remaining;
+              if (r.type === "borrow") totalBorrowPending += remaining;
+            });
+          } catch (e) {
+            console.error("Failed to compute lend/borrow pending metrics from lendBorrow", e);
+          }
+
+          const monthRt = receiverTransactionsData.filter((r) => isISOInMonth(r.date, monthKey));
+          const thisMonthSent = monthRt.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+          const thisMonthReceived = getMonthlyReceivedTotal(sendersData, monthKey);
+
+          const remainingBalance = Number(totals?.totalBalance) || 0;
+          const netWorth =
+            remainingBalance + Number(totalLentPending || 0) - Number(totalBorrowPending || 0);
+
+          console.log('[DIAGNOSTIC] loadData: Setting globalMetrics:', {
+            globalBalance: totals.totalBalance,
+            netWorth,
+            totalLentPending,
+            totalBorrowPending,
+            totalSentMoney: thisMonthSent,
+            totalReceivers,
+            thisMonthSent,
+            remainingBalance: totals.totalBalance,
+            totalSenderMoney: thisMonthReceived,
+            thisMonthReceived,
+            totalSenders
+          });
+
+          setGlobalMetrics({
+            globalBalance: totals.totalBalance,
+            netWorth,
+            totalLentPending,
+            totalBorrowPending,
+            totalSentMoney: thisMonthSent,
+            totalReceivers,
+            thisMonthSent,
+            remainingBalance: totals.totalBalance,
+            totalSenderMoney: thisMonthReceived,
+            thisMonthReceived,
+            totalSenders,
+          });
+
+          console.log('[DIAGNOSTIC] loadData: Complete - state and metrics updated');
         }
       } catch (error) {
-        console.error("Error syncing with cloud:", error);
+        console.error("[DIAGNOSTIC] Error syncing with cloud:", error);
       }
     }
 
@@ -1122,6 +1289,47 @@ export default function App() {
               </div>
 
               <div className="main-header__actions">
+                <div className="notif-wrap" ref={notifWrapRef}>
+                  <button
+                    type="button"
+                    className="header-action header-action--notification"
+                    aria-label="Notifications"
+                    aria-expanded={notificationOpen}
+                    onClick={() => setNotificationOpen((o) => !o)}
+                  >
+                    <span className="header-action__icon-wrap">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7" />
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                      </svg>
+                      <span className="notification-badge" aria-hidden="true">3</span>
+                    </span>
+                  </button>
+
+                  {notificationOpen && (
+                    <div className="notif-dropdown is-open" role="menu" aria-label="Notifications menu">
+                      <button type="button" className="notif-item" role="menuitem">
+                        <span className="notif-item__icon" aria-hidden="true">
+                          <Bell size={16} />
+                        </span>
+                        <span className="notif-item__text">Reminder</span>
+                      </button>
+                      <button type="button" className="notif-item" role="menuitem">
+                        <span className="notif-item__icon" aria-hidden="true">
+                          <UserRound size={16} />
+                        </span>
+                        <span className="notif-item__text">Receiver</span>
+                      </button>
+                      <button type="button" className="notif-item" role="menuitem">
+                        <span className="notif-item__icon" aria-hidden="true">
+                          <Wallet size={16} />
+                        </span>
+                        <span className="notif-item__text">Lenders</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <button type="button" className="header-action header-action--theme" onClick={toggleTheme} aria-label="Toggle theme">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                     <circle cx="12" cy="12" r="5" />

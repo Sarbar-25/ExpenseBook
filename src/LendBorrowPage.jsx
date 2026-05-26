@@ -45,6 +45,13 @@ export default function LendBorrowPage({ user, addToast, updateGlobalBalance }) 
   const [bulkRepayDate, setBulkRepayDate] = useState(todayISO());
   const [bulkRepayNote, setBulkRepayNote] = useState("");
 
+  // Received Money Modal states (new feature)
+  const [receivedMoneyModalOpen, setReceivedMoneyModalOpen] = useState(false);
+  const [receivedMoneyAmount, setReceivedMoneyAmount] = useState("");
+  const [receivedMoneyType, setReceivedMoneyType] = useState("Received");
+  const [receivedMoneyDate, setReceivedMoneyDate] = useState(todayISO());
+  const [receivedMoneyNote, setReceivedMoneyNote] = useState("");
+
   const getStoredWhatsAppContacts = () => {
     try {
       const raw = localStorage.getItem(CONTACTS_STORAGE_KEY);
@@ -356,6 +363,125 @@ export default function LendBorrowPage({ user, addToast, updateGlobalBalance }) 
     }
   };
 
+  const handleReceivedMoneySubmit = async (e) => {
+    e.preventDefault();
+    if (!activeLedgerSummary || !receivedMoneyAmount) return;
+
+    const amtToRepay = parseFloat(receivedMoneyAmount);
+    if (isNaN(amtToRepay) || amtToRepay <= 0) {
+      addToast("Please enter a valid amount greater than 0", "error");
+      return;
+    }
+
+    // Determine which records to apply the payment to based on type
+    const isReceived = receivedMoneyType === "Received";
+
+    // Get the appropriate pending records based on transaction type
+    const pendingRecords = activeLedgerSummary.originalRecords
+      .filter(r => {
+        // If "Received", apply to lend records (money we lent and getting back)
+        // If "Paid", apply to borrow records (money we borrowed and paying back)
+        return isReceived ? r.type === 'lend' : r.type === 'borrow';
+      })
+      .filter(r => r.status !== 'Paid')
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    if (pendingRecords.length === 0) {
+      addToast(`No pending ${isReceived ? 'lent' : 'borrowed'} records to apply payment`, "error");
+      return;
+    }
+
+    // Calculate total remaining across all pending records
+    const totalRemaining = pendingRecords.reduce((sum, r) => {
+      const repaid = r.repayments ? r.repayments.reduce((s, rep) => s + (parseFloat(rep.amount) || 0), 0) : 0;
+      return sum + Math.max(0, (parseFloat(r.amount) || 0) - repaid);
+    }, 0);
+
+    if (amtToRepay > totalRemaining) {
+      addToast(`Cannot ${isReceived ? 'receive' : 'pay'} more than remaining amount (${formatMoney(totalRemaining)})`, "error");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      // Create a transaction record
+      const repName = isReceived
+        ? `Payment from ${activeLedgerSummary.personName}`
+        : `Repaid money to ${activeLedgerSummary.personName}`;
+
+      const newTxId = await addDocToFirebase(user.uid, "transactions", {
+        name: receivedMoneyNote ? `${repName} - ${receivedMoneyNote}` : repName,
+        type: isReceived ? 'Credit' : 'Debit',
+        amount: amtToRepay,
+        date: receivedMoneyDate || todayISO(),
+        createdAt: new Date().toISOString()
+      });
+
+      // Apply payment FIFO across pending records
+      let remainingAmount = amtToRepay;
+      const updates = [];
+
+      for (const record of pendingRecords) {
+        if (remainingAmount <= 0) break;
+
+        const repaidSoFar = record.repayments ? record.repayments.reduce((s, rep) => s + (parseFloat(rep.amount) || 0), 0) : 0;
+        const originalAmt = parseFloat(record.amount) || 0;
+        const remainingForRecord = originalAmt - repaidSoFar;
+
+        if (remainingForRecord <= 0) continue;
+
+        const amountToApply = Math.min(remainingForRecord, remainingAmount);
+
+        const newRepayment = {
+          id: "rep_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9),
+          amount: amountToApply,
+          date: receivedMoneyDate || todayISO(),
+          note: receivedMoneyNote || (isReceived ? "Received Payment" : "Repayment"),
+          transactionId: newTxId,
+          transactionType: receivedMoneyType
+        };
+
+        const updatedRepayments = [...(record.repayments || []), newRepayment];
+        const newTotalRepaid = repaidSoFar + amountToApply;
+
+        let newStatus = record.status;
+        if (newTotalRepaid >= originalAmt) {
+          newStatus = "Paid";
+        } else if (newTotalRepaid > 0) {
+          newStatus = "Partial";
+        }
+
+        updates.push(updateInFirebase(user.uid, "lendBorrow", record.id, {
+          repayments: updatedRepayments,
+          status: newStatus
+        }));
+
+        remainingAmount -= amountToApply;
+      }
+
+      await Promise.all(updates);
+
+      // Await records reload before closing modal and clearing form
+      await loadRecords();
+      updateGlobalBalance?.();
+
+      setReceivedMoneyModalOpen(false);
+      setReceivedMoneyAmount("");
+      setReceivedMoneyType("Received");
+      setReceivedMoneyDate(todayISO());
+      setReceivedMoneyNote("");
+
+      const actionText = isReceived ? 'Received' : 'Paid';
+      addToast(`${actionText} ${formatMoney(amtToRepay)} successfully`, "success");
+    } catch (err) {
+      console.error("Received money error:", err);
+      addToast(`Failed to process ${isReceived ? 'receipt' : 'payment'}`, "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleBulkRepaySubmit = async (e) => {
     e.preventDefault();
     if (!activeLedgerSummary || !bulkRepayAmount) return;
@@ -375,7 +501,7 @@ export default function LendBorrowPage({ user, addToast, updateGlobalBalance }) 
       setLoading(true);
 
       // 1. Create a single transaction for the bulk receipt
-      const repName = `Received money from ${activeLedgerSummary.personName}`;
+      const repName = `Payment from ${activeLedgerSummary.personName}`;
       const bulkTxId = await addDocToFirebase(user.uid, "transactions", {
         name: bulkRepayNote ? `${repName} - ${bulkRepayNote}` : repName,
         type: 'Credit',
@@ -1259,12 +1385,14 @@ ${statusEmoji} *Status:* ${statusText} ${Math.abs(summary.pendingAmount) > 0 ? f
           <div className="people-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '15px' }}>
             {filteredPeople.map(p => (
               <article key={p.nameKey} className="card person-summary-card" style={{ padding: '1.2rem', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: 'var(--surface)' }}>
+                <div className="ledger-card-top-row" style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', marginBottom: '14px' }}>
+                  <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem', fontWeight: 'bold', flexShrink: 0 }}>
+                    {p.personName.charAt(0).toUpperCase()}
+                  </div>
+                  <span style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text)' }}>{p.personName}</span>
+                </div>
                 <div className="person-summary-card__header">
-                  <h4 className="person-summary-card__title" style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem', fontWeight: 'bold' }}>
-                      {p.personName.charAt(0).toUpperCase()}
-                    </div>
-                    {p.personName}
+                  <h4 className="person-summary-card__title" style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text)' }}>
                   </h4>
                   <div className="person-summary-card__actions">
                     <div className="whatsapp-quick-action">
@@ -1473,9 +1601,11 @@ ${statusEmoji} *Status:* ${statusText} ${Math.abs(summary.pendingAmount) > 0 ? f
               </svg>
             </button>
 
-            <h3 className="card__heading" style={{ marginTop: 0, marginBottom: '0.2rem' }}>
-              Ledger: {activeLedgerSummary.personName}
-            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.2rem', width: '100%' }}>
+              <h3 className="card__heading" style={{ margin: 0 }}>
+                Ledger: {activeLedgerSummary.personName}
+              </h3>
+            </div>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1rem' }}>
               Complete history of exchanges
             </p>
@@ -1507,7 +1637,7 @@ ${statusEmoji} *Status:* ${statusText} ${Math.abs(summary.pendingAmount) > 0 ? f
                       setBulkRepayModalOpen(true);
                     }}
                   >
-                    Receive Money
+                    Payment
                   </button>
                 )}
               </div>
@@ -1667,7 +1797,7 @@ ${statusEmoji} *Status:* ${statusText} ${Math.abs(summary.pendingAmount) > 0 ? f
             </button>
 
             <h3 className="card__heading" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
-              Receive Money
+              Payment
             </h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
               From <strong>{activeLedgerSummary.personName}</strong>
@@ -1711,7 +1841,109 @@ ${statusEmoji} *Status:* ${statusText} ${Math.abs(summary.pendingAmount) > 0 ? f
               </div>
 
               <button type="submit" className="btn btn--primary" style={{ width: '100%', marginTop: '1rem', padding: '0.8rem' }} disabled={loading}>
-                {loading ? 'Processing...' : 'Confirm Receipt'}
+                {loading ? 'Processing...' : 'Confirm Payment'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {receivedMoneyModalOpen && activeLedgerSummary && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200,
+          padding: '1rem', backdropFilter: 'blur(3px)'
+        }}>
+          <div className="card fade-in" style={{ width: '100%', maxWidth: '450px', backgroundColor: 'var(--surface)', borderRadius: 'var(--radius)', position: 'relative' }}>
+            <button
+              onClick={() => setReceivedMoneyModalOpen(false)}
+              style={{ position: 'absolute', top: '15px', right: '15px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+
+            <h3 className="card__heading" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
+              Payment
+            </h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
+              For <strong>{activeLedgerSummary.personName}</strong>
+            </p>
+
+            <form onSubmit={handleReceivedMoneySubmit} className="expense-form">
+              <div className="form-row">
+                <label>Amount</label>
+                <div className="input-group">
+                  <span className="input-prefix">Rs</span>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    required
+                    value={receivedMoneyAmount}
+                    onChange={(e) => setReceivedMoneyAmount(e.target.value)}
+                    placeholder="Enter amount"
+                  />
+                </div>
+              </div>
+
+              <div className="form-row">
+                <label>Transaction Type</label>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', padding: '0.6rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: receivedMoneyType === 'Received' ? 'rgba(52, 152, 219, 0.1)' : 'var(--surface)' }}>
+                    <input
+                      type="radio"
+                      name="transactionType"
+                      value="Received"
+                      checked={receivedMoneyType === 'Received'}
+                      onChange={(e) => setReceivedMoneyType(e.target.value)}
+                      style={{ accentColor: '#3498db' }}
+                    />
+                    <span style={{ fontWeight: 500 }}>Received</span>
+                  </label>
+                  <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', padding: '0.6rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: receivedMoneyType === 'Paid' ? 'rgba(231, 76, 60, 0.1)' : 'var(--surface)' }}>
+                    <input
+                      type="radio"
+                      name="transactionType"
+                      value="Paid"
+                      checked={receivedMoneyType === 'Paid'}
+                      onChange={(e) => setReceivedMoneyType(e.target.value)}
+                      style={{ accentColor: '#e74c3c' }}
+                    />
+                    <span style={{ fontWeight: 500 }}>Paid</span>
+                  </label>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                  {receivedMoneyType === 'Received'
+                    ? 'Record payment received from this person (applies to lent records)'
+                    : 'Record payment paid to this person (applies to borrowed records)'}
+                </div>
+              </div>
+
+              <div className="form-row">
+                <label>Date</label>
+                <input
+                  type="date"
+                  required
+                  value={receivedMoneyDate}
+                  onChange={(e) => setReceivedMoneyDate(e.target.value)}
+                />
+              </div>
+
+              <div className="form-row">
+                <label>Note / Reference (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Bank transfer, Cash, UPI..."
+                  value={receivedMoneyNote}
+                  onChange={(e) => setReceivedMoneyNote(e.target.value)}
+                />
+              </div>
+
+              <button type="submit" className="btn btn--primary" style={{ width: '100%', marginTop: '1rem', padding: '0.8rem' }} disabled={loading}>
+                {loading ? 'Processing...' : 'Confirm'}
               </button>
             </form>
           </div>

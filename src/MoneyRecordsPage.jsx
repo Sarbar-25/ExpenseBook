@@ -699,7 +699,7 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
                                     </svg>
                                 </div>
                                 <h3>{searchTerm ? "No senders match your search" : "No senders added yet"}</h3>
-                                <p>Add a sender to start tracking received money.</p>
+                                <p>Add a sender to start tracking payments.</p>
                                 {!searchTerm && (
                                     <button className="btn btn--primary" style={{ marginTop: "1rem" }} onClick={() => setAddSenderModalOpen(true)}>
                                         + Add Sender
@@ -715,7 +715,7 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
                                                 <div className="record-avatar sender">{getInitials(sender.name)}</div>
                                                 <div>
                                                     <h3 className="record-name">{sender.name}</h3>
-                                                    <p className="record-subtitle">Money Received</p>
+                                                    <p className="record-subtitle">Payment Received</p>
                                                 </div>
                                             </div>
                                             <div className="record-actions">
@@ -747,6 +747,7 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
                                             </div>
                                         </div>
 
+
                                         <div className="record-card__body">
                                             <div className="record-amount credit">
                                                 <p className="label">Total Received</p>
@@ -770,6 +771,7 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
                                                 ) : null}
                                             </div>
                                         </div>
+
 
                                         <div className="record-card__footer">
                                             <button type="button" className="btn btn--secondary btn--sm" onClick={() => setHistorySenderKey(normalizeKey(sender.name))}>
