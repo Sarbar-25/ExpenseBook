@@ -13,7 +13,7 @@ export default function SummaryChart({ type = "bar", data = [], labels = [] }) {
   // Get theme-aware colors from CSS variables
   const getChartColors = () => {
     const computedStyle = getComputedStyle(document.documentElement);
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const isDark = document.documentElement.classList.contains('dark-theme');
 
     return {
       barColors: [
@@ -168,3 +168,4 @@ export default function SummaryChart({ type = "bar", data = [], labels = [] }) {
     </div>
   );
 }
+

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { SettingsCard, ToggleSwitch, ConfirmDialog } from "./SettingsComponents";
+import { SettingsCard, ConfirmDialog } from "./SettingsComponents";
 
 export default function SettingsPage({
   user,
@@ -55,7 +55,7 @@ export default function SettingsPage({
             </div>
           </div>
           {isEditingName && (
-            <div style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(0,0,0,0.02)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+            <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--surface-soft)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
               <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.5rem', fontWeight: 500, color: 'var(--text)' }}>Update Name</label>
               <input
                 type="text"
@@ -85,7 +85,11 @@ export default function SettingsPage({
                     }
                     setUserName(trimmed);
                     setIsEditingName(false);
-                    addToast("Name updated successfully", "success");
+                    addToast({
+                      type: "success",
+                      title: "Profile Updated",
+                      description: "Your display name was updated successfully.",
+                    });
                   }}
                 >
                   Save
@@ -116,6 +120,11 @@ export default function SettingsPage({
                 setUserCurrency(e.target.value);
                 localStorage.setItem("userCurrency", e.target.value);
                 window.dispatchEvent(new Event('storage')); // trigger updates if needed
+                addToast({
+                  type: "info",
+                  title: "Currency Updated",
+                  description: `Default currency changed to ${e.target.value}.`,
+                });
               }}
               style={{ width: "100%", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "0.6rem 0.7rem", fontFamily: "inherit", fontSize: "0.9rem", background: "var(--surface)", color: "var(--text)" }}
             >
@@ -149,8 +158,6 @@ export default function SettingsPage({
             {[
               { id: "light", label: "Light Mode" },
               { id: "dark", label: "Dark Mode" },
-              { id: "blue", label: "Blue Sky" },
-              { id: "green", label: "Nature Green" },
             ].map((t) => (
               <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', color: 'var(--text)' }}>
                 <input
@@ -158,7 +165,14 @@ export default function SettingsPage({
                   name="theme"
                   value={t.id}
                   checked={theme === t.id}
-                  onChange={(e) => setTheme(e.target.value)}
+                  onChange={(e) => {
+                    setTheme(e.target.value);
+                    addToast({
+                      type: "info",
+                      title: "Theme Updated",
+                      description: `${t.label} is now active across ExpensePr.`,
+                    });
+                  }}
                   style={{ width: '16px', height: '16px', accentColor: 'var(--accent)' }}
                 />
                 <span className={`theme-swatch theme-swatch--${t.id}`}></span>
@@ -185,8 +199,8 @@ export default function SettingsPage({
           </p>
           <button
             type="button"
-            className="btn btn--primary"
-            style={{ backgroundColor: "var(--debit, #ff5c5c)", width: "fit-content" }}
+            className="btn--danger-reset"
+            style={{ width: "fit-content" }}
             onClick={() => setResetConfirmOpen(true)}
           >
             Reset All Data

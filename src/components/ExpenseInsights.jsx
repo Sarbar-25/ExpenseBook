@@ -17,9 +17,8 @@ function SkeletonCard() {
         minHeight: 156,
         borderRadius: 22,
         padding: 18,
-        border: "1px solid rgba(148, 163, 184, 0.18)",
-        background:
-          "linear-gradient(180deg, rgba(255,255,255,0.82), rgba(241,245,249,0.9))",
+        border: "1px solid var(--insight-border)",
+        background: "var(--insight-surface-alt)",
       }}
     >
       <div
@@ -27,7 +26,7 @@ function SkeletonCard() {
           width: "44%",
           height: 12,
           borderRadius: 999,
-          background: "rgba(148, 163, 184, 0.28)",
+          background: "var(--skeleton-pill)",
           marginBottom: 18,
           animation: "insightPulse 1.1s infinite ease-in-out",
         }}
@@ -39,7 +38,7 @@ function SkeletonCard() {
             width: item === 3 ? "68%" : "100%",
             height: 10,
             borderRadius: 999,
-            background: "rgba(203, 213, 225, 0.48)",
+            background: "var(--skeleton-line)",
             marginBottom: 12,
             animation: `insightPulse 1.1s ${item * 0.08}s infinite ease-in-out`,
           }}
@@ -220,17 +219,15 @@ export default function ExpenseInsights({
         padding: 0,
         overflow: "hidden",
         borderRadius: 28,
-        border: "1px solid rgba(148, 163, 184, 0.16)",
-        background:
-          "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(248,250,252,0.96) 100%)",
+        border: "1px solid var(--insight-border)",
+        background: "var(--insight-surface)",
       }}
     >
       <div
         style={{
           padding: "22px 22px 16px",
-          background:
-            "radial-gradient(circle at top left, rgba(56,189,248,0.18), transparent 35%), linear-gradient(135deg, rgba(15,23,42,0.02), rgba(15,118,110,0.04))",
-          borderBottom: "1px solid rgba(148, 163, 184, 0.12)",
+          background: "var(--insight-header-bg)",
+          borderBottom: "1px solid var(--insight-border)",
         }}
       >
         <div
@@ -252,9 +249,9 @@ export default function ExpenseInsights({
                 borderRadius: 999,
                 fontSize: 12,
                 fontWeight: 700,
-                color: "#0f172a",
-                background: "rgba(255,255,255,0.8)",
-                border: "1px solid rgba(148, 163, 184, 0.16)",
+                color: "var(--text)",
+                background: "var(--insight-pill-bg)",
+                border: "1px solid var(--insight-border)",
                 marginBottom: 14,
               }}
             >
@@ -264,12 +261,12 @@ export default function ExpenseInsights({
                   width: 8,
                   height: 8,
                   borderRadius: "50%",
-                  background: geminiConfigured ? "#10b981" : "#f59e0b",
+                  background: geminiConfigured ? "var(--success)" : "var(--insight-pill-dot-off)",
                 }}
               />
             </div>
-            <h3 style={{ margin: 0, fontSize: 24, color: "#0f172a" }}>{title}</h3>
-            <p style={{ margin: "8px 0 0", color: "#475569", maxWidth: 720 }}>
+            <h3 style={{ margin: 0, fontSize: 24, color: "var(--text)" }}>{title}</h3>
+            <p style={{ margin: "8px 0 0", color: "var(--text-muted)", maxWidth: 720 }}>
               {subtitle}
             </p>
           </div>
@@ -283,11 +280,11 @@ export default function ExpenseInsights({
               borderRadius: 18,
               padding: "14px 18px",
               minWidth: 180,
-              color: "#fff",
+              color: "var(--hero-contrast)",
               fontWeight: 700,
               cursor: loading || !hasInputData ? "not-allowed" : "pointer",
               opacity: loading || !hasInputData ? 0.7 : 1,
-              background: "linear-gradient(135deg, #0f766e 0%, #2563eb 100%)",
+              background: "var(--accent-gradient-strong)",
             }}
           >
             {loading ? "Analyzing..." : "Generate Insights"}
@@ -300,9 +297,9 @@ export default function ExpenseInsights({
               marginTop: 14,
               padding: "12px 14px",
               borderRadius: 18,
-              background: "rgba(255, 247, 237, 0.9)",
-              border: "1px solid rgba(251, 191, 36, 0.24)",
-              color: "#9a3412",
+              background: "var(--insight-warning-bg)",
+              border: "1px solid var(--insight-warning-border)",
+              color: "var(--insight-warning-text)",
               fontSize: 13,
             }}
           >
@@ -316,9 +313,9 @@ export default function ExpenseInsights({
               marginTop: 14,
               padding: "12px 14px",
               borderRadius: 18,
-              background: "rgba(254, 242, 242, 0.96)",
-              border: "1px solid rgba(248, 113, 113, 0.2)",
-              color: "#991b1b",
+              background: "var(--insight-error-bg)",
+              border: "1px solid var(--insight-error-border)",
+              color: "var(--insight-error-text)",
               fontSize: 13,
             }}
           >
@@ -334,9 +331,9 @@ export default function ExpenseInsights({
               borderRadius: 22,
               padding: 24,
               textAlign: "center",
-              color: "#475569",
-              border: "1px dashed rgba(148, 163, 184, 0.34)",
-              background: "rgba(248,250,252,0.7)",
+              color: "var(--text-muted)",
+              border: "1px dashed var(--border)",
+              background: "var(--insight-muted-surface)",
             }}
           >
             Add transactions, expenses, or lend/borrow records to unlock AI analysis.
@@ -375,10 +372,9 @@ export default function ExpenseInsights({
                   display: "flex",
                   flexDirection: "column",
                   gap: 12,
-                  border: "1px solid rgba(148, 163, 184, 0.16)",
-                  background:
-                    "linear-gradient(180deg, rgba(255,255,255,0.92), rgba(241,245,249,0.9))",
-                  boxShadow: "0 14px 30px rgba(15, 23, 42, 0.05)",
+                  border: "1px solid var(--insight-border)",
+                  background: "var(--insight-surface-alt)",
+                  boxShadow: "var(--shadow-sm)",
                 }}
               >
                 <div
@@ -386,7 +382,7 @@ export default function ExpenseInsights({
                     display: "flex",
                     alignItems: "center",
                     gap: 10,
-                    color: "#0f172a",
+                    color: "var(--text)",
                     fontWeight: 700,
                   }}
                 >
@@ -398,7 +394,7 @@ export default function ExpenseInsights({
                       alignItems: "center",
                       justifyContent: "center",
                       borderRadius: 12,
-                      background: "rgba(14,116,144,0.08)",
+                      background: "var(--insight-card-icon-bg)",
                     }}
                   >
                     {card.icon}
@@ -408,7 +404,7 @@ export default function ExpenseInsights({
                 <p
                   style={{
                     margin: 0,
-                    color: "#475569",
+                    color: "var(--text-muted)",
                     lineHeight: 1.65,
                     fontSize: 14,
                     whiteSpace: "pre-wrap",

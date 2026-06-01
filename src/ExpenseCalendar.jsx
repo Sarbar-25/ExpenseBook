@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { formatMoney, formatDateDisplay } from "./utils.js";
+import CalendarFullViewModal from "./components/CalendarFullViewModal.jsx";
+
 
 /**
  * Month grid: shows daily expense totals; click a day to inspect entries.
@@ -124,7 +126,51 @@ export default function ExpenseCalendar({
                 aria-label={`${cell.day}, ${hasExp ? formatMoney(agg.total) + " spent" : "no expenses"}`}
               >
                 <span className="calendar-cell__num">{cell.day}</span>
-                {hasExp && <span className="calendar-cell__dot" title={`${agg.count} expense(s)`} />}
+                {hasExp && (
+                  <span className="calendar-cell__dots" aria-hidden="true" title={`${agg.count} expense(s)`}>
+                    {(() => {
+                      // Pure visual: derive up to 3 category-ish dots from the first few entries on that date.
+                      // Defensive rendering only; does NOT change totals or filtering.
+                      const dayEntries = Array.isArray(expenses)
+                        ? expenses.filter((e) => e && e.date === cell.dateStr)
+                        : [];
+
+                      const maxDots = 3;
+                      const palette = ["var(--expense-dot-1)", "var(--expense-dot-2)", "var(--expense-dot-3)"];
+                      const fallback = "var(--expense-dot-4)";
+
+                      const getCategoryKey = (e) => {
+                        const cat = e?.category || e?.type || "Other";
+                        return String(cat || "Other").trim().toLowerCase();
+                      };
+
+                      const catToColor = new Map();
+                      let dotIndex = 0;
+
+                      const dots = [];
+                      for (const e of dayEntries.slice(0, Math.max(8, maxDots * 3))) {
+                        const key = getCategoryKey(e);
+                        if (!catToColor.has(key)) {
+                          catToColor.set(key, palette[Math.min(dotIndex, palette.length - 1)] || fallback);
+                          dotIndex++;
+                          if (catToColor.size >= maxDots) break;
+                        }
+                      }
+
+                      const colors = Array.from(catToColor.values()).slice(0, maxDots);
+                      for (let i = 0; i < colors.length; i++) {
+                        dots.push(<span key={i} className="calendar-cell__dot" style={{ backgroundColor: colors[i] }} />);
+                      }
+
+                      // If we couldn't derive category colors (e.g. no category/type), show a single neutral dot.
+                      if (!dots.length) {
+                        dots.push(<span key="fallback" className="calendar-cell__dot" style={{ backgroundColor: fallback }} />);
+                      }
+
+                      return dots;
+                    })()}
+                  </span>
+                )}
                 {hasExp && <span className="calendar-cell__mini">{formatMoney(agg.total)}</span>}
               </button>
             );
@@ -138,6 +184,8 @@ export default function ExpenseCalendar({
 /** Side panel: list expenses for one day */
 export function CalendarDayPanel({ selectedDate, expenses, onJumpToForm, setExpenseDate }) {
   const [calendarFilter, setCalendarFilter] = useState("selected");
+  const [isFullViewOpen, setIsFullViewOpen] = useState(false);
+
 
   const list = useMemo(() => {
     if (!selectedDate) return [];
@@ -197,13 +245,21 @@ export function CalendarDayPanel({ selectedDate, expenses, onJumpToForm, setExpe
             Yesterday
           </button>
 
-          <button
-            type="button"
-            onClick={() => setCalendarFilter("all")}
-            className={`quick-date-btn ${calendarFilter === "all" ? "active" : ""}`}
-          >
-            Full View
-          </button>
+          {/**
+           * Full View should only appear when there are more than 5 entries
+           * for the currently selected date/day.
+           */}
+          {list.length > 5 ? (
+            <button
+              type="button"
+              onClick={() => setIsFullViewOpen(true)}
+              className={`quick-date-btn ${calendarFilter === "all" ? "active" : ""}`}
+            >
+              Click for Full View
+            </button>
+          ) : (
+            <span style={{ display: "none" }} />
+          )}
         </div>
 
       </div>
@@ -212,7 +268,8 @@ export function CalendarDayPanel({ selectedDate, expenses, onJumpToForm, setExpe
           <p className="calendar-panel__empty">No expenses on this date.</p>
         ) : (
           <ul className="calendar-panel__list">
-            {filteredList.map((e) => (
+            {/** compact preview: show only first 5 */}
+            {filteredList.slice(0, 5).map((e) => (
               <li key={e.id} className="calendar-panel__item">
                 <span className="calendar-panel__name">{e.name}</span>
                 <span className="calendar-panel__amt">{formatMoney(e.amount)}</span>
@@ -221,6 +278,13 @@ export function CalendarDayPanel({ selectedDate, expenses, onJumpToForm, setExpe
           </ul>
         )
       }
+
+      <CalendarFullViewModal
+        isOpen={isFullViewOpen}
+        selectedDate={selectedDate}
+        entries={list}
+        onClose={() => setIsFullViewOpen(false)}
+      />
     </div >
   );
 }

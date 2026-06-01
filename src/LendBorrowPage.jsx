@@ -6,7 +6,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import ExpenseInsights from "./components/ExpenseInsights.jsx";
 
-export default function LendBorrowPage({ user, addToast, updateGlobalBalance }) {
+export default function LendBorrowPage({ user, addToast, requestConfirm, updateGlobalBalance }) {
   const CONTACTS_STORAGE_KEY = "expensebook_person_whatsapp_contacts";
 
   const [activeTab, setActiveTab] = useState("lend"); // "lend" or "borrow"
@@ -252,23 +252,36 @@ export default function LendBorrowPage({ user, addToast, updateGlobalBalance }) 
   };
 
   const handleDelete = async (record) => {
-    if (confirm("Are you sure you want to delete this record? This action cannot be undone and will erase tied transactions.")) {
-      try {
-        await deleteFromFirebase(user.uid, "lendBorrow", record.id);
-        if (record.creationTxId) await deleteFromFirebase(user.uid, "transactions", record.creationTxId);
-        if (record.repayments && record.repayments.length > 0) {
-          for (const rep of record.repayments) {
-            if (rep.transactionId) await deleteFromFirebase(user.uid, "transactions", rep.transactionId);
+    requestConfirm?.({
+      title: "Delete lend/borrow record?",
+      message: "This action cannot be undone and will also remove linked transactions.",
+      confirmLabel: "Delete Record",
+      onConfirm: async () => {
+        try {
+          await deleteFromFirebase(user.uid, "lendBorrow", record.id);
+          if (record.creationTxId) await deleteFromFirebase(user.uid, "transactions", record.creationTxId);
+          if (record.repayments && record.repayments.length > 0) {
+            for (const rep of record.repayments) {
+              if (rep.transactionId) await deleteFromFirebase(user.uid, "transactions", rep.transactionId);
+            }
           }
+          if (record.repaymentTxId) await deleteFromFirebase(user.uid, "transactions", record.repaymentTxId); // Legacy
+          addToast({
+            type: "success",
+            title: "Record Deleted",
+            description: "The lend/borrow record and linked entries were removed successfully.",
+          });
+          loadRecords();
+          updateGlobalBalance?.();
+        } catch (err) {
+          addToast({
+            type: "error",
+            title: "Delete Failed",
+            description: "We could not delete that lend/borrow record.",
+          });
         }
-        if (record.repaymentTxId) await deleteFromFirebase(user.uid, "transactions", record.repaymentTxId); // Legacy
-        addToast("Record deleted", "success");
-        loadRecords();
-        updateGlobalBalance?.();
-      } catch (err) {
-        addToast("Failed to delete record", "error");
-      }
-    }
+      },
+    });
   };
 
   const handleOpenRepay = (record) => {
@@ -776,7 +789,7 @@ ${statusEmoji} *Status:* ${statusText} ${Math.abs(summary.pendingAmount) > 0 ? f
             </button>
           )}
           <button
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#3498db', padding: '0.4rem' }}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--icon-info)', padding: '0.4rem' }}
             onClick={() => { handleEdit(r); setAllRecordsModalOpen(false); }}
             title="Edit"
           >
@@ -786,7 +799,7 @@ ${statusEmoji} *Status:* ${statusText} ${Math.abs(summary.pendingAmount) > 0 ? f
             </svg>
           </button>
           <button
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#e74c3c', padding: '0.4rem' }}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--icon-danger)', padding: '0.4rem' }}
             onClick={() => handleDelete(r)}
             title="Delete"
           >
@@ -1142,7 +1155,7 @@ ${statusEmoji} *Status:* ${statusText} ${Math.abs(summary.pendingAmount) > 0 ? f
 
       <div className="summary-grid">
         <article className="card card--summary">
-          <div className="card__icon" style={{ backgroundColor: 'rgba(52, 152, 219, 0.1)', color: '#3498db', padding: '10px', borderRadius: '50%' }}>
+          <div className="card__icon" style={{ backgroundColor: 'var(--icon-info-bg)', color: 'var(--icon-info)', padding: '10px', borderRadius: '50%' }}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M5 12h14M12 5l7 7-7 7" />
             </svg>
@@ -1152,17 +1165,17 @@ ${statusEmoji} *Status:* ${statusText} ${Math.abs(summary.pendingAmount) > 0 ? f
         </article>
 
         <article className="card card--summary">
-          <div className="card__icon" style={{ backgroundColor: 'rgba(241, 196, 15, 0.1)', color: '#f1c40f', padding: '10px', borderRadius: '50%' }}>
+          <div className="card__icon" style={{ backgroundColor: 'var(--icon-warning-bg)', color: 'var(--icon-warning)', padding: '10px', borderRadius: '50%' }}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
             </svg>
           </div>
           <h3 className="card__label">Pending Receive</h3>
-          <p className="card__value" style={{ color: '#f39c12' }}>{formatMoney(summaries.pendingReceive)}</p>
+          <p className="card__value" style={{ color: 'var(--warning)' }}>{formatMoney(summaries.pendingReceive)}</p>
         </article>
 
         <article className="card card--summary">
-          <div className="card__icon" style={{ backgroundColor: 'rgba(231, 76, 60, 0.1)', color: '#e74c3c', padding: '10px', borderRadius: '50%' }}>
+          <div className="card__icon" style={{ backgroundColor: 'var(--icon-danger-bg)', color: 'var(--icon-danger)', padding: '10px', borderRadius: '50%' }}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
@@ -1172,14 +1185,14 @@ ${statusEmoji} *Status:* ${statusText} ${Math.abs(summary.pendingAmount) > 0 ? f
         </article>
 
         <article className="card card--summary">
-          <div className="card__icon" style={{ backgroundColor: 'rgba(230, 126, 34, 0.1)', color: '#e67e22', padding: '10px', borderRadius: '50%' }}>
+          <div className="card__icon" style={{ backgroundColor: 'var(--warning-soft)', color: 'var(--warning)', padding: '10px', borderRadius: '50%' }}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="2" y="4" width="20" height="16" rx="2" />
               <circle cx="12" cy="12" r="3" />
             </svg>
           </div>
           <h3 className="card__label">Pending Pay</h3>
-          <p className="card__value" style={{ color: '#d35400' }}>{formatMoney(summaries.pendingPay)}</p>
+          <p className="card__value" style={{ color: 'var(--danger)' }}>{formatMoney(summaries.pendingPay)}</p>
         </article>
       </div>
 
@@ -1461,16 +1474,7 @@ ${statusEmoji} *Status:* ${statusText} ${Math.abs(summary.pendingAmount) > 0 ? f
         )}
       </div>
 
-      {/* AI Insights Section */}
-      <ExpenseInsights
-        userName="User"
-        records={records}
-        lendBorrowRecords={records}
-        monthLabel="lend and borrow history"
-        addToast={addToast}
-        title="AI Lend & Borrow Insights"
-        subtitle="Use Gemini to review pending balances, repayment trends, and practical follow-up actions from your lending history."
-      />
+
 
       {allRecordsModalOpen && (
         <div style={{

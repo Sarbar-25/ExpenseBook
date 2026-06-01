@@ -1,19 +1,33 @@
 import { useMemo, useState, useCallback, useEffect, memo, useRef } from "react";
-import { Bell, UserRound, Wallet } from "lucide-react";
+import {
+  BellRing,
+  Calendar,
+  Handshake,
+  Home,
+  ReceiptText,
+  Settings,
+  UsersRound,
+  Wallet,
+} from "lucide-react";
 
 
 import SummaryChart from "./SummaryChart.jsx";
 
 
-import ExpenseCalendar, { CalendarDayPanel } from "./ExpenseCalendar.jsx";
+import CalendarPage from "./CalendarPage.jsx";
 import SettingsPage from "./SettingsPage.jsx";
-import { ToastContainer } from "./SettingsComponents.jsx";
+import { ConfirmDialog, NotificationPanel, ToastContainer } from "./SettingsComponents.jsx";
 import LendBorrowPage from "./LendBorrowPage.jsx";
 import MoneyRecordsPage from "./MoneyRecordsPage.jsx";
+import TransactionsPage from "./TransactionsPage.jsx";
+import ExpensesPage from "./ExpensesPage.jsx";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./firebase";
 import Login from "./Login.jsx";
 import ExpenseInsights from "./components/ExpenseInsights.jsx";
+import RemindersCard from "./components/RemindersCard.jsx";
+import DashboardSummaryIllustration from "./components/DashboardSummaryIllustration.jsx";
+
 import {
   saveToFirebase,
   fetchFromFirebase,
@@ -102,11 +116,6 @@ async function fetchDashboardMetrics(userId) {
   }
 }
 
-
-
-
-
-
 function initials(name) {
   return name
     .split(/\s+/)
@@ -182,6 +191,33 @@ function getMonthlyReceivedTotal(senderRows, monthKey) {
   }, 0);
 }
 
+const NOTIFICATIONS_STORAGE_KEY = "expensepr_notifications";
+const NOTIFICATION_LIMIT = 100;
+
+function loadStoredNotifications() {
+  if (typeof window === "undefined" || !window.localStorage) return [];
+
+  try {
+    const raw = window.localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+    const parsed = JSON.parse(raw || "[]");
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter(
+      (item) =>
+        item &&
+        typeof item.id === "string" &&
+        typeof item.title === "string" &&
+        typeof item.description === "string"
+    );
+  } catch {
+    return [];
+  }
+}
+
+function createNotificationId() {
+  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
 // Memoized Modal component to prevent unnecessary re-renders
 const Modal = memo(({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
@@ -219,9 +255,11 @@ export default function App() {
   // Safely get theme from localStorage with fallback to "light"
   const [theme, setTheme] = useState(() => {
     try {
-      return typeof window !== "undefined" && window.localStorage
-        ? localStorage.getItem("theme") || "light"
-        : "light";
+      const storedTheme =
+        typeof window !== "undefined" && window.localStorage
+          ? localStorage.getItem("theme") || "light"
+          : "light";
+      return storedTheme === "dark" ? "dark" : "light";
     } catch {
       return "light";
     }
@@ -238,25 +276,24 @@ export default function App() {
   });
 
   const applyThemeToDom = useCallback((nextTheme) => {
-
-    const safeTheme = nextTheme || "light";
+    const normalizedTheme = nextTheme === "dark" ? "dark" : "light";
+    const themeClass = `${normalizedTheme}-theme`;
 
     if (typeof document === "undefined") return;
 
     try {
-      document.body?.classList?.remove("light", "dark", "blue", "green");
-      document.body?.classList?.add(safeTheme);
+      document.body?.classList?.remove("light-theme", "dark-theme");
+      document.body?.classList?.add(themeClass);
     } catch (_) { }
 
     try {
-      document.documentElement.classList.remove("light", "dark", "blue", "green");
-      document.documentElement.classList.add(safeTheme);
-      document.documentElement.setAttribute("data-theme", safeTheme);
+      document.documentElement.classList.remove("light-theme", "dark-theme");
+      document.documentElement.classList.add(themeClass);
     } catch (_) { }
 
     if (typeof window !== "undefined" && window.localStorage) {
       try {
-        localStorage.setItem("theme", safeTheme);
+        localStorage.setItem("theme", normalizedTheme);
       } catch (_) { }
     }
   }, []);
@@ -274,7 +311,7 @@ export default function App() {
     const onStorage = (e) => {
       try {
         if (e?.key !== "theme") return;
-        const next = e.newValue || "light";
+        const next = e.newValue === "dark" ? "dark" : "light";
         setTheme(next);
         applyThemeToDom(next);
       } catch (error) {
@@ -397,6 +434,15 @@ export default function App() {
 
   const [notificationOpen, setNotificationOpen] = useState(false);
   const notifWrapRef = useRef(null);
+  const [notifications, setNotifications] = useState(() => loadStoredNotifications());
+  const [toasts, setToasts] = useState([]);
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    confirmLabel: "Confirm",
+    onConfirm: null,
+  });
 
   useEffect(() => {
     if (!notificationOpen) return;
@@ -415,6 +461,15 @@ export default function App() {
       document.removeEventListener("touchstart", onDocDown);
     };
   }, [notificationOpen]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    try {
+      window.localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notifications));
+    } catch (error) {
+      console.warn("Failed to persist notifications:", error);
+    }
+  }, [notifications]);
 
 
 
@@ -454,7 +509,9 @@ export default function App() {
     // Update active nav based on route
     if (path === "/senders") setActiveNav("senders");
     else if (path === "/settings") setActiveNav("settings");
+    else if (path === "/reminders") setActiveNav("reminders");
     else if (path === "/lendBorrow") setActiveNav("lendBorrow");
+    else if (path === "/calendar") setActiveNav("calendar");
     else setActiveNav("dashboard");
   }, [normalizeRoute]);
 
@@ -467,7 +524,9 @@ export default function App() {
       setRoutePath(current);
       if (current === "/senders") setActiveNav("senders");
       else if (current === "/settings") setActiveNav("settings");
+      else if (current === "/reminders") setActiveNav("reminders");
       else if (current === "/lendBorrow") setActiveNav("lendBorrow");
+      else if (current === "/calendar") setActiveNav("calendar");
       else setActiveNav("dashboard");
     };
 
@@ -490,13 +549,97 @@ export default function App() {
     }
   }, [normalizeRoute]);
 
-  const [toasts, setToasts] = useState([]);
-  const addToast = useCallback((message, type = "success") => {
-    const id = Date.now().toString() + Math.random().toString();
-    setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3000);
+  const unreadNotificationCount = useMemo(
+    () => notifications.filter((item) => !item.read).length,
+    [notifications]
+  );
+
+  const removeToast = useCallback((id) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  }, []);
+
+  const addToast = useCallback((input, fallbackType = "success") => {
+    const type = typeof input === "object" && input?.type ? input.type : fallbackType;
+    const defaults = {
+      success: "Success",
+      error: "Action Failed",
+      warning: "Attention Needed",
+      info: "Update",
+    };
+    const payload =
+      typeof input === "string"
+        ? {
+          title: defaults[type] || defaults.info,
+          description: input,
+          type,
+        }
+        : {
+          title: input?.title || defaults[type] || defaults.info,
+          description: input?.description || input?.message || "",
+          type,
+        };
+
+    if (!payload.description) return;
+
+    const id = createNotificationId();
+    const timestamp = new Date().toISOString();
+    const nextItem = {
+      id,
+      type: payload.type,
+      title: payload.title,
+      description: payload.description,
+      timestamp,
+      read: false,
+    };
+
+    setNotifications((prev) => [nextItem, ...prev].slice(0, NOTIFICATION_LIMIT));
+    setToasts((prev) => [{ ...nextItem, isClosing: false }, ...prev]);
+
+    window.setTimeout(() => {
+      setToasts((prev) =>
+        prev.map((toast) => (toast.id === id ? { ...toast, isClosing: true } : toast))
+      );
+    }, 4400);
+
+    window.setTimeout(() => {
+      removeToast(id);
+    }, 5000);
+  }, [removeToast]);
+
+  const requestConfirm = useCallback((options) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: options?.title || "Please confirm",
+      message: options?.message || "Are you sure you want to continue?",
+      confirmLabel: options?.confirmLabel || "Confirm",
+      onConfirm: options?.onConfirm || null,
+    });
+  }, []);
+
+  const handleConfirmDialogCancel = useCallback(() => {
+    setConfirmDialog((prev) => ({ ...prev, isOpen: false, onConfirm: null }));
+  }, []);
+
+  const handleConfirmDialogConfirm = useCallback(async () => {
+    const action = confirmDialog.onConfirm;
+    setConfirmDialog((prev) => ({ ...prev, isOpen: false, onConfirm: null }));
+    if (typeof action === "function") {
+      await action();
+    }
+  }, [confirmDialog]);
+
+  const markNotificationRead = useCallback((id) => {
+    setNotifications((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, read: true } : item))
+    );
+  }, []);
+
+  const markAllNotificationsRead = useCallback(() => {
+    setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
+  }, []);
+
+  const clearAllNotifications = useCallback(() => {
+    setNotifications([]);
   }, []);
 
   const calMonth = useMemo(() => dateFromMonthKey(selectedMonth), [selectedMonth]);
@@ -521,6 +664,35 @@ export default function App() {
     () => senders.filter((sender) => isISOInMonth(sender.date, selectedMonth)),
     [senders, selectedMonth]
   );
+
+  // Update dashboard counters to reflect month selection
+  useEffect(() => {
+    // Count unique senders present in the selected month
+    const totalSendersMonth = getUniqueSenderCount(visibleMonthSenders);
+    // Count unique receivers that have transactions in the selected month
+    const receiverIds = new Set(visibleMonthReceiverTransactions.map((rt) => rt.id));
+    const totalReceiversMonth = receiverIds.size;
+    // Sum of amounts sent this month (receiver transactions are treated as debits)
+    const thisMonthSent = visibleMonthReceiverTransactions.reduce(
+      (sum, rt) => sum + (Number(rt.amount) || 0),
+      0
+    );
+    // Sum of amounts received this month (credits from sender transactions)
+    const thisMonthReceived = visibleMonthTransactions.reduce((sum, tx) => {
+      if (!tx) return sum;
+      if (tx.type !== "Credit") return sum;
+
+      const amt = Number(tx.amount) || 0;
+      return amt > 0 ? sum + amt : sum;
+    }, 0);
+    setGlobalMetrics((prev) => ({
+      ...prev,
+      totalSenders: totalSendersMonth,
+      totalReceivers: totalReceiversMonth,
+      thisMonthSent,
+      thisMonthReceived,
+    }));
+  }, [visibleMonthSenders, visibleMonthReceiverTransactions, selectedMonth]);
 
   const todayStr = useMemo(() => todayISO(), []);
   const yesterdayStr = useMemo(() => {
@@ -629,7 +801,7 @@ export default function App() {
 
     try {
       // Use the same cloud payload that drives dashboard lists to keep UI consistent.
-      const cloudData = await fetchFromFirebase(user.uid);
+      const cloudData = await fetchFromFirebase("D5OAD47F9jbUts6TJQbpys7MmHz1");
       console.log('[DIAGNOSTIC] updateGlobalBalance: Firebase response for request #', requestId, {
         sendersCount: cloudData?.senders?.length || 0,
         transactionsCount: cloudData?.transactions?.length || 0,
@@ -1047,64 +1219,91 @@ export default function App() {
   }, []);
 
   const handleResetData = async () => {
-    const confirmed = typeof window !== "undefined" && window.confirm
-      ? window.confirm("Are you sure you want to delete all your data? This cannot be undone.")
-      : false;
+    if (!user) return;
 
-    if (confirmed && user) {
-      try {
-        await clearFirebaseData(user.uid);
-        setTransactions([]);
-        setExpenses([]);
-        addToast("All data deleted successfully", "success");
-      } catch (error) {
-        console.error("Error resetting data:", error);
-        addToast("Failed to delete data", "error");
-      }
-    }
+    requestConfirm({
+      title: "Reset all data?",
+      message: "This will permanently delete your transactions, expenses, and cloud backup. This action cannot be undone.",
+      confirmLabel: "Delete Everything",
+      onConfirm: async () => {
+        try {
+          await clearFirebaseData(user.uid);
+          setTransactions([]);
+          setExpenses([]);
+          addToast({
+            type: "success",
+            title: "Data Reset Complete",
+            description: "All dashboard records and backup data were deleted successfully.",
+          });
+        } catch (error) {
+          console.error("Error resetting data:", error);
+          addToast({
+            type: "error",
+            title: "Reset Failed",
+            description: "We could not delete your data. Please try again.",
+          });
+        }
+      },
+    });
   };
 
   const deleteTransaction = useCallback(async (id) => {
     if (!user) return;
 
-    // Safely check for user confirmation
-    const confirmed = typeof window !== "undefined" && window.confirm
-      ? window.confirm("Are you sure you want to delete this transaction?")
-      : true;
-
-    if (!confirmed) return;
-
-    try {
-      await deleteFromFirebase("transactions", id, user.uid);
-      setTransactions(prev => prev.filter(tx => tx.id !== id));
-      await updateGlobalBalance();
-      addToast("Transaction deleted", "success");
-    } catch (error) {
-      console.error("Error deleting transaction:", error);
-      addToast("Failed to delete transaction", "error");
-    }
-  }, [user, updateGlobalBalance, addToast]);
+    requestConfirm({
+      title: "Delete transaction?",
+      message: "This transaction will be removed from your records immediately.",
+      confirmLabel: "Delete Transaction",
+      onConfirm: async () => {
+        try {
+          await deleteFromFirebase("transactions", id, user.uid);
+          setTransactions(prev => prev.filter(tx => tx.id !== id));
+          await updateGlobalBalance();
+          addToast({
+            type: "success",
+            title: "Transaction Deleted",
+            description: "The transaction was removed successfully.",
+          });
+        } catch (error) {
+          console.error("Error deleting transaction:", error);
+          addToast({
+            type: "error",
+            title: "Delete Failed",
+            description: "We could not delete that transaction.",
+          });
+        }
+      },
+    });
+  }, [user, updateGlobalBalance, addToast, requestConfirm]);
 
   const deleteExpense = useCallback(async (id) => {
     if (!user) return;
 
-    // Safely check for user confirmation
-    const confirmed = typeof window !== "undefined" && window.confirm
-      ? window.confirm("Are you sure you want to delete this expense?")
-      : true;
-
-    if (!confirmed) return;
-
-    try {
-      await deleteFromFirebase("expenses", id, user.uid);
-      setExpenses(prev => prev.filter(e => e.id !== id));
-      await updateGlobalBalance();
-      addToast("Expense deleted", "success");
-    } catch (error) {
-      console.error("Error deleting expense:", error);
-      addToast("Failed to delete expense", "error");
-    }
-  }, [user, updateGlobalBalance, addToast]);
+    requestConfirm({
+      title: "Delete expense?",
+      message: "This expense entry will be removed from your monthly records.",
+      confirmLabel: "Delete Expense",
+      onConfirm: async () => {
+        try {
+          await deleteFromFirebase("expenses", id, user.uid);
+          setExpenses(prev => prev.filter(e => e.id !== id));
+          await updateGlobalBalance();
+          addToast({
+            type: "success",
+            title: "Expense Deleted",
+            description: "The expense was removed successfully.",
+          });
+        } catch (error) {
+          console.error("Error deleting expense:", error);
+          addToast({
+            type: "error",
+            title: "Delete Failed",
+            description: "We could not delete that expense.",
+          });
+        }
+      },
+    });
+  }, [user, updateGlobalBalance, addToast, requestConfirm]);
 
   if (authLoading) {
     return (
@@ -1149,16 +1348,32 @@ export default function App() {
             <p className="sidebar__subtitle">Premium fintech workspace</p>
           </div>
         </div>
+
+        <div className="sidebar__profile-chip" aria-label="Profile">
+          <span className="profile-chip__avatar">{userInitials}</span>
+          <div className="profile-chip__info">
+            <span className="profile-chip__name">{stableUserName}</span>
+            <span className="profile-chip__role">Premium User</span>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true" className="profile-chip__chevron">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </div>
+
         <nav className="sidebar__nav">
+
           {[
             { id: "dashboard", label: "Dashboard", section: "dashboard" },
-            { id: "calendar", label: "Calendar", section: "calendar" },
+            { id: "calendar", label: "Calendar", path: "/calendar" },
+
             { id: "senders", label: "Senders & Receivers", path: "/senders" },
             { id: "transactions", label: "Transactions", section: "transactions" },
             { id: "expenses", label: "Expenses", section: "expenses" },
+            { id: "reminders", label: "Reminders", path: "/reminders" },
             { id: "lendBorrow", label: "Lend & Borrow", section: "lendBorrow" },
             { id: "settings", label: "Settings", path: "/settings" },
           ].map((item) => (
+
             <a
               key={item.id}
               href={item.path || `#${item.section}`}
@@ -1173,52 +1388,14 @@ export default function App() {
                 }
               }}
             >
-              {item.id === "dashboard" && (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                  <polyline points="9 22 9 12 15 12 15 22" />
-                </svg>
-              )}
-              {item.id === "calendar" && (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="4" width="18" height="18" rx="2" />
-                  <line x1="16" y1="2" x2="16" y2="6" />
-                  <line x1="8" y1="2" x2="8" y2="6" />
-                  <line x1="3" y1="10" x2="21" y2="10" />
-                </svg>
-              )}
-              {item.id === "senders" && (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                </svg>
-              )}
-              {item.id === "transactions" && (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="12" y1="1" x2="12" y2="23" />
-                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                </svg>
-              )}
-              {item.id === "expenses" && (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
-                </svg>
-              )}
-              {item.id === "lendBorrow" && (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                </svg>
-              )}
-              {item.id === "settings" && (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                </svg>
-              )}
+              {item.id === "dashboard" && <Home size={20} />}
+              {item.id === "calendar" && <Calendar size={20} />}
+              {item.id === "senders" && <UsersRound size={20} />}
+              {item.id === "transactions" && <ReceiptText size={20} />}
+              {item.id === "expenses" && <Wallet size={20} />}
+              {item.id === "reminders" && <BellRing size={20} />}
+              {item.id === "lendBorrow" && <Handshake size={20} />}
+              {item.id === "settings" && <Settings size={20} />}
               {item.label}
             </a>
           ))}
@@ -1266,9 +1443,73 @@ export default function App() {
             setUserName={setUserName}
             addToast={addToast}
           />
+        ) : activeNav === "reminders" ? (
+          <div className="settings-container">
+            <RemindersCard addToast={addToast} requestConfirm={requestConfirm} />
+          </div>
+        ) : activeNav === "calendar" ? (
+          <CalendarPage
+            calMonth={calMonth}
+            selectedMonthLabel={selectedMonthLabel}
+            expenses={expenses}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            setSelectedMonth={setSelectedMonth}
+            onPrevMonth={() => setSelectedMonth((monthKey) => shiftMonthKey(monthKey, -1))}
+            onNextMonth={() => setSelectedMonth((monthKey) => shiftMonthKey(monthKey, 1))}
+            monthlyBalance={Number(monthlyTotals.totalBalance) || 0}
+            thisMonthExpenses={Number(monthlyTotals.totalExpenses) || 0}
+            onNavigateToReminders={() => setRoute("/reminders")}
+          />
+        ) : activeNav === "transactions" ? (
+          <TransactionsPage
+            selectedMonth={selectedMonth}
+            selectedMonthLabel={selectedMonthLabel}
+            setSelectedMonth={setSelectedMonth}
+            transactionName={transactionName}
+            setTransactionName={setTransactionName}
+            transactionType={transactionType}
+            setTransactionType={setTransactionType}
+            transactionDate={transactionDate}
+            setTransactionDate={setTransactionDate}
+            transactionAmount={transactionAmount}
+            setTransactionAmount={setTransactionAmount}
+            onTransactionSubmit={onTransactionSubmit}
+            visibleMonthTransactions={visibleMonthTransactions}
+            deleteTransaction={deleteTransaction}
+            setActiveModal={setActiveModal}
+            formatDateDisplay={formatDateDisplay}
+            formatMoney={formatMoney}
+          />
+        ) : activeNav === "expenses" ? (
+          <ExpensesPage
+            selectedMonth={selectedMonth}
+            selectedMonthLabel={selectedMonthLabel}
+            setSelectedMonth={setSelectedMonth}
+            expenseName={expenseName}
+            setExpenseName={setExpenseName}
+            expenseDate={expenseDate}
+            setExpenseDate={setExpenseDate}
+            expenseAmount={expenseAmount}
+            setExpenseAmount={setExpenseAmount}
+            onExpenseSubmit={onExpenseSubmit}
+            expenseSearch={expenseSearch}
+            setExpenseSearch={setExpenseSearch}
+            filteredMonthExpenses={filteredMonthExpenses}
+            deleteExpense={deleteExpense}
+            setActiveModal={setActiveModal}
+            formatDateDisplay={formatDateDisplay}
+            formatMoney={formatMoney}
+          />
         ) : activeNav === "lendBorrow" ? (
-          <LendBorrowPage user={user} addToast={addToast} updateGlobalBalance={updateGlobalBalance} />
+          <LendBorrowPage
+            user={user}
+            addToast={addToast}
+            requestConfirm={requestConfirm}
+            updateGlobalBalance={updateGlobalBalance}
+          />
         ) : activeNav === "senders" ? (
+
           <MoneyRecordsPage
             user={user}
             addToast={addToast}
@@ -1302,31 +1543,22 @@ export default function App() {
                         <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7" />
                         <path d="M13.73 21a2 2 0 0 1-3.46 0" />
                       </svg>
-                      <span className="notification-badge" aria-hidden="true">3</span>
+                      {unreadNotificationCount > 0 && (
+                        <span className="notification-badge" aria-hidden="true">
+                          {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
+                        </span>
+                      )}
                     </span>
                   </button>
 
                   {notificationOpen && (
-                    <div className="notif-dropdown is-open" role="menu" aria-label="Notifications menu">
-                      <button type="button" className="notif-item" role="menuitem">
-                        <span className="notif-item__icon" aria-hidden="true">
-                          <Bell size={16} />
-                        </span>
-                        <span className="notif-item__text">Reminder</span>
-                      </button>
-                      <button type="button" className="notif-item" role="menuitem">
-                        <span className="notif-item__icon" aria-hidden="true">
-                          <UserRound size={16} />
-                        </span>
-                        <span className="notif-item__text">Receiver</span>
-                      </button>
-                      <button type="button" className="notif-item" role="menuitem">
-                        <span className="notif-item__icon" aria-hidden="true">
-                          <Wallet size={16} />
-                        </span>
-                        <span className="notif-item__text">Lenders</span>
-                      </button>
-                    </div>
+                    <NotificationPanel
+                      notifications={notifications}
+                      unreadCount={unreadNotificationCount}
+                      onMarkAllRead={markAllNotificationsRead}
+                      onClearAll={clearAllNotifications}
+                      onItemClick={markNotificationRead}
+                    />
                   )}
                 </div>
 
@@ -1336,14 +1568,8 @@ export default function App() {
                     <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
                   </svg>
                 </button>
-                <div className="profile-chip" aria-label="Profile">
-                  <span className="profile-chip__avatar">{userInitials}</span>
-                  <span className="profile-chip__name">{stableUserName}</span>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="profile-chip__chevron">
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </div>
               </div>
+
             </header>
 
             <header className="top-bar">
@@ -1413,19 +1639,26 @@ export default function App() {
               </h2>
 
               <div className="summary-grid" style={{ marginBottom: '2rem' }}>
-                <article className="card card--summary bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700">
-                  <div className="card__icon bg-gray-100 dark:bg-slate-700">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-700 dark:text-white">
+                <article className="card card--summary">
+                  <div className="card__summary-illustration" aria-hidden="true">
+                    <DashboardSummaryIllustration variant="netWorth" />
+                  </div>
+                  <div className="card__icon" style={{ backgroundColor: 'var(--icon-primary-bg)', color: 'var(--icon-primary)' }}>
+
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
                     </svg>
                   </div>
-                  <h3 className="card__label text-gray-700 dark:text-gray-300">Net Worth</h3>
-                  <p className="card__value text-black dark:text-white font-bold">{formatMoney(globalMetrics.netWorth)}</p>
+                  <h3 className="card__label">Net Worth</h3>
+                  <p className="card__value" style={{ fontWeight: 700 }}>{formatMoney(globalMetrics.netWorth)}</p>
 
                 </article>
 
                 <article className="card card--summary">
-                  <div className="card__icon" style={{ backgroundColor: 'rgba(46, 204, 113, 0.1)', color: '#2ecc71' }}>
+                  <div className="card__summary-illustration" aria-hidden="true">
+                    <DashboardSummaryIllustration variant="totalBalance" />
+                  </div>
+                  <div className="card__icon" style={{ backgroundColor: 'var(--icon-success-bg)', color: 'var(--icon-success)' }}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M3 3h18v18H3z M3 9h18" />
                     </svg>
@@ -1435,7 +1668,10 @@ export default function App() {
                 </article>
 
                 <article className="card card--summary">
-                  <div className="card__icon" style={{ backgroundColor: 'rgba(241, 196, 15, 0.1)', color: '#f1c40f' }}>
+                  <div className="card__summary-illustration" aria-hidden="true">
+                    <DashboardSummaryIllustration variant="lentOut" />
+                  </div>
+                  <div className="card__icon" style={{ backgroundColor: 'var(--icon-warning-bg)', color: 'var(--icon-warning)' }}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M5 12h14M12 5l7 7-7 7" />
                     </svg>
@@ -1445,7 +1681,10 @@ export default function App() {
                 </article>
 
                 <article className="card card--summary">
-                  <div className="card__icon" style={{ backgroundColor: 'rgba(231, 76, 60, 0.1)', color: '#e74c3c' }}>
+                  <div className="card__summary-illustration" aria-hidden="true">
+                    <DashboardSummaryIllustration variant="borrowed" />
+                  </div>
+                  <div className="card__icon" style={{ backgroundColor: 'var(--icon-danger-bg)', color: 'var(--icon-danger)' }}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M19 12H5M12 19l-7-7 7-7" />
                     </svg>
@@ -1457,7 +1696,10 @@ export default function App() {
 
               <div className="summary-grid" style={{ marginBottom: '2rem' }}>
                 <article className="card card--summary">
-                  <div className="card__icon" style={{ backgroundColor: 'rgba(52, 152, 219, 0.1)', color: '#3498db' }}>
+                  <div className="card__summary-illustration" aria-hidden="true">
+                    <DashboardSummaryIllustration variant="senders" />
+                  </div>
+                  <div className="card__icon" style={{ backgroundColor: 'var(--icon-info-bg)', color: 'var(--icon-info)' }}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
                     </svg>
@@ -1466,7 +1708,10 @@ export default function App() {
                   <p className="card__value">{globalMetrics.totalSenders}</p>
                 </article>
                 <article className="card card--summary">
-                  <div className="card__icon" style={{ backgroundColor: 'rgba(155, 89, 182, 0.1)', color: '#9b59b6' }}>
+                  <div className="card__summary-illustration" aria-hidden="true">
+                    <DashboardSummaryIllustration variant="receivers" />
+                  </div>
+                  <div className="card__icon" style={{ backgroundColor: 'var(--icon-violet-bg)', color: 'var(--icon-violet)' }}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" />
                       <path d="M2 22c0-5.5 4.5-10 10-10s10 4.5 10 10" />
@@ -1476,7 +1721,10 @@ export default function App() {
                   <p className="card__value">{globalMetrics.totalReceivers}</p>
                 </article>
                 <article className="card card--summary">
-                  <div className="card__icon" style={{ backgroundColor: 'rgba(46, 204, 113, 0.1)', color: '#2ecc71' }}>
+                  <div className="card__summary-illustration" aria-hidden="true">
+                    <DashboardSummaryIllustration variant="sent" />
+                  </div>
+                  <div className="card__icon" style={{ backgroundColor: 'var(--icon-success-bg)', color: 'var(--icon-success)' }}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M3 17h18M16 7l5 5-5 5M2 12h6" />
                     </svg>
@@ -1485,7 +1733,10 @@ export default function App() {
                   <p className="card__value">{formatMoney(globalMetrics.thisMonthSent)}</p>
                 </article>
                 <article className="card card--summary">
-                  <div className="card__icon" style={{ backgroundColor: 'rgba(46, 204, 113, 0.1)', color: '#2ecc71' }}>
+                  <div className="card__summary-illustration" aria-hidden="true">
+                    <DashboardSummaryIllustration variant="received" />
+                  </div>
+                  <div className="card__icon" style={{ backgroundColor: 'var(--icon-success-bg)', color: 'var(--icon-success)' }}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="20 6 9 17 4 12"></polyline>
                     </svg>
@@ -1528,20 +1779,11 @@ export default function App() {
                 </div>
               </article>
 
-              <ExpenseInsights
-                userName={userName}
-                transactions={visibleMonthTransactions}
-                expenses={visibleMonthExpenses}
-                receiverTransactions={visibleMonthReceiverTransactions}
-                globalMetrics={globalMetrics}
-                monthLabel={selectedMonthLabel}
-                addToast={addToast}
-                title="AI Expense Insights"
-                subtitle="Generate a monthly Gemini summary, spending analysis, suggestions, and budget advice from your live dashboard data."
-              />
 
-              <div className="summary-grid">
+
+              <div className="summary-grid" style={{ marginTop: 0 }}>
                 <article className="card card--summary card--highlight">
+
                   <div className="card__icon card__icon--balance">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
@@ -1608,337 +1850,55 @@ export default function App() {
                     ]}
                   />
                 </div>
-                <div className="card card--recent">
-                  <div className="card__header-row" style={{ marginBottom: "0.5rem" }}>
-                    <h3 className="card__heading">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: "6px" }}>
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                      </svg>
-                      Recent entries ({selectedMonthLabel})
-                    </h3>
-                    <button
-                      type="button"
-                      className="btn--show-all"
-                      onClick={() => setActiveModal('recent')}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
-                      Full View
-                    </button>
-                  </div>
-                  <ul className="recent-list">
-                    {recentItems.length === 0 ? (
-                      <li className="empty-state">No activity in this month.</li>
-                    ) : (
-                      recentItems.map((item) => {
-                        const isCredit = item.type === "Credit";
-                        const amountClass = isCredit ? "is-credit" : "is-debit";
-                        const sign = isCredit ? "+" : "-";
-                        const meta = item.kind === "exp" ? "Expense" : item.type;
-                        return (
-                          <li key={item.id} className="recent-item">
-                            <div>
-                              <div className="recent-item__name">{item.name}</div>
-                              <div className="recent-item__meta">
-                                {meta} - {formatDateDisplay(item.date)}
-                              </div>
+              </div>
+
+              <div className="card card--recent card--recent-full">
+                <div className="card__header-row card__header-row--recent" style={{ marginBottom: "0.5rem" }}>
+                  <h3 className="card__heading">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: "6px" }}>
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                    Recent entries ({selectedMonthLabel})
+                  </h3>
+                  <button
+                    type="button"
+                    className="btn--show-all"
+                    onClick={() => setActiveModal('recent')}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
+                    Full View
+                  </button>
+                </div>
+                <ul className="recent-list recent-list--dashboard">
+                  {recentItems.length === 0 ? (
+                    <li className="empty-state">No activity in this month.</li>
+                  ) : (
+                    recentItems.map((item) => {
+                      const isCredit = item.type === "Credit";
+                      const amountClass = isCredit ? "is-credit" : "is-debit";
+                      const sign = isCredit ? "+" : "-";
+                      const meta = item.kind === "exp" ? "Expense" : item.type;
+                      return (
+                        <li key={item.id} className="recent-item">
+                          <div className="recent-item__content">
+                            <div className="recent-item__name">{item.name}</div>
+                            <div className="recent-item__meta">
+                              {meta} - {formatDateDisplay(item.date)}
                             </div>
-                            <span className={`recent-item__amount ${amountClass}`}>
-                              {sign}
-                              {formatMoney(item.amount)}
-                            </span>
-                          </li>
-                        );
-                      })
-                    )}
-                  </ul>
-                </div>
-              </div>
-            </section>
-
-            <section className="section" id="calendar" aria-labelledby="calendar-heading">
-              <h2 id="calendar-heading" className="section__title">
-                Expense calendar
-              </h2>
-              <p className="section__intro">
-                Browse by day to see spending. Days with expenses are highlighted; totals roll up for the visible month.
-              </p>
-              <div className="calendar-layout">
-                <div className="calendar-layout__main">
-                  <ExpenseCalendar
-                    viewMonth={calMonth}
-                    onPrevMonth={() => setSelectedMonth((m) => shiftMonthKey(m, -1))}
-                    onNextMonth={() => setSelectedMonth((m) => shiftMonthKey(m, 1))}
-                    expenses={expenses}
-                    selectedDate={selectedDate}
-                    onSelectDate={setSelectedDate}
-                  />
-                </div>
-                <div className="calendar-layout__side">
-                  <CalendarDayPanel
-                    selectedDate={selectedDate}
-                    expenses={expenses}
-                    onJumpToForm={() => scrollTo("expenses", "expenses")}
-                  />
-                </div>
-              </div>
-            </section>
-
-            <section className="section" id="transactions" aria-labelledby="tx-heading">
-              <h2 id="tx-heading" className="section__title">
-                Debit and credit records
-              </h2>
-              <div className="expense-grid">
-                <div className="card">
-                  <h3 className="card__heading">Add transaction</h3>
-                  <form className="expense-form" onSubmit={onTransactionSubmit}>
-                    <div className="form-row">
-                      <label htmlFor="transactionName">Name / details</label>
-                      <input
-                        type="text"
-                        id="transactionName"
-                        required
-                        placeholder="e.g. Salary"
-                        autoComplete="off"
-                        value={transactionName}
-                        onChange={(e) => setTransactionName(e.target.value)}
-                      />
-                    </div>
-                    <div className="form-row">
-                      <label htmlFor="transactionType">Type</label>
-                      <select
-                        id="transactionType"
-                        value={transactionType}
-                        onChange={(e) => setTransactionType(e.target.value)}
-                        style={{ width: "100%", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "0.6rem 0.7rem", fontFamily: "inherit", fontSize: "0.9rem", background: "var(--surface)", color: "var(--text)" }}
-                      >
-                        <option value="Credit">Credit</option>
-                        <option value="Debit">Debit</option>
-                      </select>
-                    </div>
-                    <div className="form-row">
-                      <label htmlFor="transactionDate">Date</label>
-                      <input
-                        type="date"
-                        id="transactionDate"
-                        required
-                        value={transactionDate}
-                        onChange={(e) => setTransactionDate(e.target.value)}
-                      />
-                    </div>
-                    <div className="form-row">
-                      <label htmlFor="transactionAmount">Amount</label>
-                      <div className="input-group">
-                        <span className="input-prefix">Rs</span>
-                        <input
-                          type="number"
-                          id="transactionAmount"
-                          min="0"
-                          step="0.01"
-                          required
-                          placeholder="0.00"
-                          value={transactionAmount}
-                          onChange={(e) => setTransactionAmount(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <button type="submit" className="btn btn--primary btn--block">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="12" y1="5" x2="12" y2="19" />
-                        <line x1="5" y1="12" x2="19" y2="12" />
-                      </svg>
-                      Add transaction
-                    </button>
-                  </form>
-                </div>
-                <div className="card">
-                  <div className="card__header-row">
-                    <h3 className="card__heading">Your transactions ({selectedMonthLabel})</h3>
-                    <button
-                      type="button"
-                      className="btn--show-all"
-                      onClick={() => setActiveModal('transactions')}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
-                      Full View
-                    </button>
-                  </div>
-                  <div className="table-wrap">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Name</th>
-                          <th>Date</th>
-                          <th>Type</th>
-                          <th className="align-right">Amount</th>
-                          <th className="align-right">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {visibleMonthTransactions.length === 0 ? (
-                          <tr>
-                            <td colSpan="4" className="empty-state">
-                              No transactions for {selectedMonthLabel}.
-                            </td>
-                          </tr>
-                        ) : (
-                          visibleMonthTransactions.slice(0, 3).map((tx) => {
-                            const isCredit = tx.type === "Credit";
-                            return (
-                              <tr key={tx.id}>
-                                <td>{tx.name}</td>
-                                <td>{formatDateDisplay(tx.date)}</td>
-                                <td>
-                                  <span className={`badge ${isCredit ? "badge--credit" : "badge--debit"}`}>{tx.type}</span>
-                                </td>
-                                <td className={`align-right ${isCredit ? "amount--credit" : "amount--debit"}`}>
-                                  {formatMoney(tx.amount)}
-                                </td>
-                                <td className="align-right">
-                                  <button
-                                    className="btn--icon"
-                                    onClick={() => deleteTransaction(tx.id)}
-                                    title="Delete transaction"
-                                    style={{ color: 'var(--danger)', padding: '4px' }}
-                                  >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                      <polyline points="3 6 5 6 21 6"></polyline>
-                                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                                    </svg>
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section className="section" id="expenses" aria-labelledby="exp-heading">
-              <h2 id="exp-heading" className="section__title">
-                Expense list
-              </h2>
-              <div className="expense-grid">
-                <div className="card">
-                  <h3 className="card__heading">Add expense</h3>
-                  <form className="expense-form" onSubmit={onExpenseSubmit}>
-                    <div className="form-row">
-                      <label htmlFor="expenseName">Particulars</label>
-                      <input
-                        type="text"
-                        id="expenseName"
-                        required
-                        className="expense-input expense-input--text"
-                        placeholder="e.g. Office supplies"
-                        autoComplete="off"
-                        value={expenseName}
-                        onChange={(e) => setExpenseName(e.target.value)}
-                      />
-                    </div>
-
-
-                    <div className="form-row">
-                      <label htmlFor="expenseDate">Date</label>
-                      <input
-                        type="date"
-                        id="expenseDate"
-                        required
-                        className="expense-input expense-input--date"
-                        value={expenseDate}
-                        onChange={(e) => setExpenseDate(e.target.value)}
-                      />
-                    </div>
-
-
-                    <div className="form-row">
-                      <label htmlFor="expenseAmount">Amount</label>
-                      <div className="expense-amount">
-                        <span className="expense-amount__prefix">Rs</span>
-                        <input
-                          type="number"
-                          id="expenseAmount"
-                          className="expense-input expense-input--number"
-                          min="0"
-                          step="0.01"
-                          required
-                          placeholder="0.00"
-                          value={expenseAmount}
-                          onChange={(e) => setExpenseAmount(e.target.value)}
-                        />
-                      </div>
-                    </div>
-
-
-                    <button
-                      type="submit"
-                      className="btn btn--primary btn--block btn--expense-add"
-                    >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="12" y1="5" x2="12" y2="19" />
-                        <line x1="5" y1="12" x2="19" y2="12" />
-                      </svg>
-                      Add expense
-                    </button>
-
-                  </form>
-                </div>
-                <div className="card">
-                  <div className="card__header-row">
-                    <h3 className="card__heading">Your expenses ({selectedMonthLabel})</h3>
-                    <button
-                      type="button"
-                      className="btn--show-all"
-                      onClick={() => setActiveModal('expenses')}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6px' }}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
-                      Full View
-                    </button>
-                  </div>
-                  <div className="form-row" style={{ marginBottom: "1rem" }}>
-                    <input
-                      type="text"
-                      className="expense-search-input"
-                      placeholder="Search by name or date..."
-                      autoComplete="off"
-                      value={expenseSearch}
-                      onChange={(e) => setExpenseSearch(e.target.value)}
-                    />
-                  </div>
-
-                  <ul className="expense-list">
-                    {filteredMonthExpenses.length === 0 ? (
-                      <li className="empty-state">No matching expenses found.</li>
-                    ) : (
-                      filteredMonthExpenses.slice(0, 3).map((e) => (
-                        <li key={e.id} className="expense-item expense-item--row">
-                          <span className="expense-item__name">
-                            {e.name}
-                            {e.date && <span className="expense-item__date">{formatDateDisplay(e.date)}</span>}
+                          </div>
+                          <span className={`recent-item__amount ${amountClass}`}>
+                            {sign}
+                            {formatMoney(item.amount)}
                           </span>
-                          <span className="expense-item__amount">{formatMoney(e.amount)}</span>
-                          <button
-                            className="btn--icon btn--icon-danger"
-                            onClick={() => deleteExpense(e.id)}
-                            title="Delete expense"
-                          >
-
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <polyline points="3 6 5 6 21 6"></polyline>
-                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                            </svg>
-                          </button>
                         </li>
-                      ))
-                    )}
-                  </ul>
-                </div>
+                      );
+                    })
+                  )}
+                </ul>
               </div>
-            </section>
 
+            </section>
           </>
         )}
         <footer className="footer">
@@ -2044,7 +2004,16 @@ export default function App() {
 
       </Modal>
 
-      <ToastContainer toasts={toasts} onClose={(id) => setToasts(prev => prev.filter(t => t.id !== id))} />
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        onConfirm={handleConfirmDialogConfirm}
+        onCancel={handleConfirmDialogCancel}
+      />
+
+      <ToastContainer toasts={toasts} onClose={removeToast} />
 
     </div>
   );

@@ -77,7 +77,7 @@ export default function Login() {
         <button 
           type="button" 
           className="btn btn--block" 
-          style={{ background: "white", color: "black", border: "1px solid #ccc" }}
+          style={{ background: "var(--surface)", color: "var(--text)", border: "1px solid var(--border)" }}
           onClick={handleGoogleSignIn}
         >
           <svg width="18" height="18" viewBox="0 0 48 48" style={{ marginRight: "8px", verticalAlign: "middle" }}>

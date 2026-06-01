@@ -56,6 +56,69 @@ function isSameDayOrLater(a, b) {
 }
 
 export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }) {
+    const MONTH_OPTIONS = [
+        "January 2026",
+        "February 2026",
+        "March 2026",
+        "April 2026",
+        "May 2026",
+        "June 2026",
+        "July 2026",
+        "August 2026",
+        "September 2026",
+        "October 2026",
+        "November 2026",
+        "December 2026",
+    ];
+
+    const [selectedMonth, setSelectedMonth] = useState("May 2026");
+    const [isMonthDropdownOpen, setIsMonthDropdownOpen] = useState(false);
+
+    const MonthSelector = () => {
+        return (
+            <div className="month-selector" style={{ position: "relative", zIndex: 5 }}>
+                <button
+                    type="button"
+                    className="month-selector__btn"
+                    onClick={() => setIsMonthDropdownOpen((v) => !v)}
+                    aria-haspopup="listbox"
+                    aria-expanded={isMonthDropdownOpen}
+                >
+                    <span className="month-selector__icon" aria-hidden="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                            <line x1="16" y1="2" x2="16" y2="6" />
+                            <line x1="8" y1="2" x2="8" y2="6" />
+                            <line x1="3" y1="10" x2="21" y2="10" />
+                        </svg>
+                    </span>
+                    <span className="month-selector__text">{selectedMonth}</span>
+                    <span className="month-selector__chev" aria-hidden="true">▾</span>
+                </button>
+
+                <div
+                    className={`month-selector__menu ${isMonthDropdownOpen ? "is-open" : ""}`}
+                    role="listbox"
+                    aria-label="Select month"
+                >
+                    {MONTH_OPTIONS.map((m) => (
+                        <button
+                            key={m}
+                            type="button"
+                            className={`month-selector__item ${m === selectedMonth ? "is-active" : ""}`}
+                            onClick={() => {
+                                setSelectedMonth(m);
+                                setIsMonthDropdownOpen(false);
+                            }}
+                        >
+                            {m}
+                        </button>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+
     const [activeTab, setActiveTab] = useState("senders");
     const [searchTerm, setSearchTerm] = useState("");
     const [loading, setLoading] = useState(true);
@@ -177,11 +240,44 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
         loadAll();
     }, [loadAll]);
 
+    const monthKeyFromLabel = (label) => {
+        // "May 2026" -> "2026-05"
+        if (!label) return "";
+        const [monthNameRaw, yearRaw] = label.split(" ");
+        const year = String(yearRaw || "").trim();
+        const monthName = String(monthNameRaw || "").trim().toLowerCase();
+        const monthMap = {
+            january: "01",
+            february: "02",
+            march: "03",
+            april: "04",
+            may: "05",
+            june: "06",
+            july: "07",
+            august: "08",
+            september: "09",
+            october: "10",
+            november: "11",
+            december: "12",
+        };
+        const mm = monthMap[monthName];
+        if (!year || !mm) return "";
+        return `${year}-${mm}`;
+    };
+
+    const selectedMonthKey = monthKeyFromLabel(selectedMonth);
+
     const groupedSenders = useMemo(() => {
         const map = new Map();
         const storedContacts = getStoredContacts(SENDER_CONTACTS_STORAGE_KEY);
 
         senderEntries.forEach((entry) => {
+            // Filter UI by selected month using only transaction.date
+            if (selectedMonthKey) {
+                const dateKey = (entry?.date || "").slice(0, 7);
+                if (dateKey !== selectedMonthKey) return;
+            }
+
             const name = (entry.name || "").trim();
             if (!name) return;
             const key = normalizeKey(name);
@@ -217,40 +313,87 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
 
         rows.sort((a, b) => (b.lastDate || "").localeCompare(a.lastDate || ""));
         return rows;
-    }, [senderEntries, getStoredContacts]);
+    }, [senderEntries, getStoredContacts, selectedMonthKey]);
 
     const groupedReceivers = useMemo(() => {
         const txByReceiver = new Map();
-        receiverTransactions.forEach((tx) => {
+
+        (receiverTransactions || []).forEach((tx) => {
             if (!tx.receiver_id) return;
-            if (!txByReceiver.has(tx.receiver_id)) txByReceiver.set(tx.receiver_id, []);
-            txByReceiver.get(tx.receiver_id).push({ ...tx, amount: Number(tx.amount) || 0 });
+
+            // Filter by selected month using tx.date (format: "YYYY-MM-DD")
+            if (selectedMonthKey) {
+                const txMonthKey = (tx.date || "").slice(0, 7);
+                if (txMonthKey !== selectedMonthKey) return;
+            }
+
+            if (!txByReceiver.has(tx.receiver_id)) {
+                txByReceiver.set(tx.receiver_id, []);
+            }
+
+            txByReceiver.get(tx.receiver_id).push({
+                ...tx,
+                amount: Number(tx.amount) || 0,
+            });
         });
 
-        const storedContacts = getStoredContacts(RECEIVER_CONTACTS_STORAGE_KEY);
+        const storedContacts =
+            getStoredContacts(RECEIVER_CONTACTS_STORAGE_KEY);
 
         const rows = receiverEntries.map((receiver) => {
-            const history = txByReceiver.get(receiver.id) || [];
-            const totalSent = history.reduce((sum, tx) => sum + (Number(tx.amount) || 0), Number(receiver.startingBalance) || 0);
-            const lastDate = history.reduce((max, tx) => (isSameDayOrLater(tx.date, max) ? tx.date || max : max), receiver.updatedAt || receiver.createdAt || "");
+            const history =
+                txByReceiver.get(receiver.id) || [];
+
+            const totalSent = history.reduce(
+                (sum, tx) =>
+                    sum + (Number(tx.amount) || 0),
+                0
+            );
+
+            const lastDate = history.reduce(
+                (max, tx) =>
+                    (tx.date || "") > (max || "")
+                        ? tx.date
+                        : max,
+                receiver.createdAt || ""
+            );
+
             const key = normalizeKey(receiver.name);
+
             return {
                 id: receiver.id,
-                name: receiver.name || "Unnamed Receiver",
-                relation: receiver.relation || "Other",
-                phoneNumber: receiver.phoneNumber || storedContacts[key] || "",
-                startingBalance: Number(receiver.startingBalance) || 0,
+                name:
+                    receiver.name || "Unnamed Receiver",
+                relation:
+                    receiver.relation || "Other",
+                phoneNumber:
+                    receiver.phoneNumber ||
+                    storedContacts[key] ||
+                    "",
+                startingBalance:
+                    Number(receiver.startingBalance) || 0,
                 notes: receiver.notes || "",
-                createdAt: receiver.createdAt || "",
+                createdAt:
+                    receiver.createdAt || "",
                 lastDate,
-                history: [...history].sort((a, b) => (b.date || "").localeCompare(a.date || "")),
+                history: [...history].sort((a, b) =>
+                    (b.date || "").localeCompare(
+                        a.date || ""
+                    )
+                ),
                 totalSent,
             };
         });
 
-        rows.sort((a, b) => b.totalSent - a.totalSent);
-        return rows;
-    }, [receiverEntries, receiverTransactions, getStoredContacts]);
+        const filteredRows = rows.filter(r => r.history.length > 0);
+        filteredRows.sort((a, b) => b.totalSent - a.totalSent);
+        return filteredRows;
+    }, [
+        receiverEntries,
+        receiverTransactions,
+        getStoredContacts,
+        selectedMonthKey,
+    ]);
 
     const selectedSender = useMemo(() => {
         if (!selectedSenderKey) return null;
@@ -651,6 +794,8 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
                         <line x1="21" y1="21" x2="16.65" y2="16.65" />
                     </svg>
                 </div>
+
+                <MonthSelector />
 
                 <button
                     type="button"
@@ -1201,7 +1346,7 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
         .tabs-switcher {
           display: flex;
           position: relative;
-          background: var(--surface-light, #f8fafc);
+          background: var(--surface-light);
           padding: 4px;
           border-radius: 12px;
           border: 1px solid var(--border);
@@ -1220,7 +1365,7 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
           transition: color 0.3s ease;
         }
         .tab-btn.is-active {
-          color: var(--primary);
+          color: var(--accent);
         }
         .tab-indicator {
           position: absolute;
@@ -1228,7 +1373,7 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
           left: 4px;
           height: calc(100% - 8px);
           width: calc(50% - 4px);
-          background: white;
+          background: var(--surface);
           border-radius: 8px;
           box-shadow: 0 2px 4px rgba(0,0,0,0.05);
           transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1237,8 +1382,8 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
           transform: translateX(100%);
         }
         .icon-btn.whatsapp {
-          background: #25D366;
-          color: white;
+          background: var(--whatsapp);
+          color: var(--hero-contrast);
           border: none;
           width: 32px;
           height: 32px;
@@ -1247,12 +1392,12 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
           align-items: center;
           justify-content: center;
           transition: all 0.3s ease;
-          box-shadow: 0 2px 4px rgba(37, 211, 102, 0.2);
+          box-shadow: 0 2px 4px var(--whatsapp-shadow);
         }
         .icon-btn.whatsapp:hover {
-          background: #128C7E;
+          background: var(--whatsapp-hover);
           transform: scale(1.1);
-          box-shadow: 0 4px 8px rgba(37, 211, 102, 0.3);
+          box-shadow: 0 4px 8px var(--whatsapp-shadow);
         }
         .icon-btn.whatsapp svg {
           filter: drop-shadow(0 1px 1px rgba(0,0,0,0.1));
@@ -1287,10 +1432,10 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
           justify-content: center;
           font-weight: 700;
           font-size: 1.1rem;
-          color: white;
+          color: var(--hero-contrast);
         }
         .record-avatar.sender { background: var(--primary); }
-        .record-avatar.receiver { background: #9b59b6; }
+        .record-avatar.receiver { background: var(--violet); }
         .record-name { margin: 0; font-size: 1.15rem; font-weight: 600; }
         .record-subtitle { margin: 2px 0 0; color: var(--text-muted); font-size: 0.9rem; }
         .record-actions { display: flex; gap: 0.5rem; }
@@ -1299,7 +1444,7 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
           height: 34px;
           border-radius: 8px;
           border: 1px solid var(--border);
-          background: white;
+          background: var(--surface);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -1308,7 +1453,7 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
           transition: all 0.2s;
         }
         .icon-btn:hover { background: var(--border); color: var(--text); }
-        .icon-btn.whatsapp:hover { color: #25D366; border-color: #25D366; }
+        .icon-btn.whatsapp:hover { color: var(--whatsapp); border-color: var(--whatsapp); }
         .record-card__body { flex: 1; margin-bottom: 1.25rem; }
         .record-amount { margin-bottom: 1rem; }
         .record-amount .label { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 4px; }
@@ -1325,6 +1470,101 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
           margin-top: auto;
           padding-top: 1rem;
         }
+
+        /* Month selector (UI only - no filtering logic) */
+        .month-selector__btn{
+          display:flex;
+          align-items:center;
+          gap:10px;
+          padding:10px 14px;
+          border-radius:999px;
+          border:1px solid var(--focus-border);
+          background: linear-gradient(180deg, var(--accent-soft) 0%, transparent 100%);
+          color: var(--text);
+          box-shadow: 0 16px 36px var(--card-glow);
+          cursor:pointer;
+          transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+          white-space:nowrap;
+        }
+        .month-selector__btn:hover{
+          transform: translateY(-1px);
+          border-color: var(--accent);
+          box-shadow: 0 22px 50px var(--card-glow-strong);
+        }
+        .month-selector__icon{
+          width:34px;height:34px;
+          border-radius:999px;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          background: var(--accent-soft);
+          color: var(--accent);
+          border: 1px solid var(--focus-border);
+          flex-shrink:0;
+        }
+        .month-selector__text{
+          font-weight:800;
+          letter-spacing:-0.01em;
+          font-size: 0.95rem;
+        }
+        .month-selector__chev{
+          margin-left:2px;
+          color: var(--text-muted);
+          font-weight:900;
+          transition: transform 0.2s ease;
+        }
+        .month-selector__menu{
+          position:absolute;
+          top: calc(100% + 10px);
+          right: 0;
+          min-width: 220px;
+          max-width: 320px;
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 16px;
+          box-shadow: var(--shadow-lg);
+          padding: 8px;
+          z-index: 50;
+          opacity: 0;
+          transform: translateY(-6px) scale(0.98);
+          pointer-events: none;
+          transition: opacity 0.16s ease, transform 0.18s cubic-bezier(0.4,0,0.2,1);
+        }
+        .month-selector__menu.is-open{
+          opacity: 1;
+          transform: translateY(0) scale(1);
+          pointer-events: auto;
+        }
+        .month-selector__item{
+          width:100%;
+          text-align:left;
+          border: none;
+          background: transparent;
+          color: var(--text);
+          font-family: inherit;
+          font-weight: 700;
+          font-size: 0.9rem;
+          padding: 10px 12px;
+          border-radius: 12px;
+          cursor:pointer;
+          transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+        }
+        .month-selector__item:hover{
+          background: var(--card-soft);
+          color: var(--accent);
+          transform: translateY(-1px);
+        }
+        .month-selector__item.is-active{
+          background: var(--accent-soft);
+          color: var(--accent-strong);
+          box-shadow: inset 0 0 0 1px var(--focus-border);
+        }
+        @media (max-width: 640px){
+          .month-selector{ width: 100%; }
+          .month-selector__btn{ width: 100%; justify-content: space-between; }
+          .month-selector__menu{ left:0; right:0; min-width: 0; }
+        }
+
         @keyframes slideUp {
           from { opacity: 0; transform: translateY(10px); }
           to { opacity: 1; transform: translateY(0); }
