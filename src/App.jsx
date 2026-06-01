@@ -801,7 +801,7 @@ export default function App() {
 
     try {
       // Use the same cloud payload that drives dashboard lists to keep UI consistent.
-      const cloudData = await fetchFromFirebase("D5OAD47F9jbUts6TJQbpys7MmHz1");
+      const cloudData = await fetchFromFirebase(user.uid);
       console.log('[DIAGNOSTIC] updateGlobalBalance: Firebase response for request #', requestId, {
         sendersCount: cloudData?.senders?.length || 0,
         transactionsCount: cloudData?.transactions?.length || 0,
@@ -1521,7 +1521,7 @@ export default function App() {
           <>
             <header className="main-header">
               <div className="main-header__greeting">
-                <span className="greeting-prefix">Welcome back,</span>
+                <span className="greeting-prefix">Welcome back,testing</span>
                 <span className="user-name">
                   <span className="user-name__text">{stableUserName}</span>
                   <span className="user-name__wave" aria-hidden="true">👋</span>

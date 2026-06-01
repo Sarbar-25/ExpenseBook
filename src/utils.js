@@ -4,6 +4,7 @@ import {
   addDoc,
   collection,
   getDocs,
+  getDoc,
   orderBy,
   query,
   deleteDoc,
@@ -18,6 +19,31 @@ const userCollection = (userId, collectionName) => collection(db, "users", userI
 export async function fetchFromFirebase(userId) {
   if (!userId) return { expenses: [], transactions: [], receiverTransactions: [], senders: [], lendBorrow: [] };
   try {
+    const userDocRef = doc(db, "users", userId);
+    const userDocSnap = await getDoc(userDocRef);
+
+    console.log("USER DOC EXISTS:", userDocSnap.exists());
+    console.log("USER DOC DATA:", userDocSnap.data());
+
+    if (userDocSnap.exists()) {
+      const data = userDocSnap.data();
+
+      if (
+        Array.isArray(data.expenses) ||
+        Array.isArray(data.transactions) ||
+        Array.isArray(data.senders)
+      ) {
+        console.log("OLD DATA FOUND");
+
+        return {
+          expenses: data.expenses || [],
+          transactions: data.transactions || [],
+          receiverTransactions: data.receiver_transactions || [],
+          senders: data.senders || [],
+          lendBorrow: data.lendBorrow || []
+        };
+      }
+    }
     const expQ = query(userCollection(userId, "expenses"), orderBy("date", "desc"));
     const expSnap = await getDocs(expQ);
     const expensesRaw = [];
