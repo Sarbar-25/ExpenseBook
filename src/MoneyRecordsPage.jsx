@@ -10,9 +10,12 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase";
 import {
+    currentMonthKey,
+    filterRowsByMonth,
     saveToFirebase,
     formatDateDisplay,
     formatMoney,
+    normalizeEntityKey,
     todayISO,
 } from "./utils.js";
 
@@ -48,73 +51,38 @@ function getInitials(name) {
 }
 
 function normalizeKey(value) {
-    return (value || "").trim().toLowerCase();
+    return normalizeEntityKey(value);
 }
 
 function isSameDayOrLater(a, b) {
     return (a || "").localeCompare(b || "") >= 0;
 }
 
-export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }) {
-    const MONTH_OPTIONS = [
-        "January 2026",
-        "February 2026",
-        "March 2026",
-        "April 2026",
-        "May 2026",
-        "June 2026",
-        "July 2026",
-        "August 2026",
-        "September 2026",
-        "October 2026",
-        "November 2026",
-        "December 2026",
-    ];
-
-    const [selectedMonth, setSelectedMonth] = useState("May 2026");
-    const [isMonthDropdownOpen, setIsMonthDropdownOpen] = useState(false);
+export default function MoneyRecordsPage({
+    user,
+    addToast,
+    updateGlobalBalance,
+    selectedMonth,
+    selectedMonthLabel,
+    setSelectedMonth,
+}) {
 
     const MonthSelector = () => {
         return (
-            <div className="month-selector" style={{ position: "relative", zIndex: 5 }}>
-                <button
-                    type="button"
-                    className="month-selector__btn"
-                    onClick={() => setIsMonthDropdownOpen((v) => !v)}
-                    aria-haspopup="listbox"
-                    aria-expanded={isMonthDropdownOpen}
-                >
-                    <span className="month-selector__icon" aria-hidden="true">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                            <line x1="16" y1="2" x2="16" y2="6" />
-                            <line x1="8" y1="2" x2="8" y2="6" />
-                            <line x1="3" y1="10" x2="21" y2="10" />
-                        </svg>
-                    </span>
-                    <span className="month-selector__text">{selectedMonth}</span>
-                    <span className="month-selector__chev" aria-hidden="true">▾</span>
-                </button>
-
-                <div
-                    className={`month-selector__menu ${isMonthDropdownOpen ? "is-open" : ""}`}
-                    role="listbox"
-                    aria-label="Select month"
-                >
-                    {MONTH_OPTIONS.map((m) => (
-                        <button
-                            key={m}
-                            type="button"
-                            className={`month-selector__item ${m === selectedMonth ? "is-active" : ""}`}
-                            onClick={() => {
-                                setSelectedMonth(m);
-                                setIsMonthDropdownOpen(false);
-                            }}
-                        >
-                            {m}
-                        </button>
-                    ))}
+            <div className="card month-filter-card" style={{ marginBottom: 0, minWidth: "220px", flex: "0 1 260px" }}>
+                <div className="form-row" style={{ marginBottom: "0.5rem" }}>
+                    <label htmlFor="moneyRecordsMonthSelect">Selected month</label>
+                    <input
+                        id="moneyRecordsMonthSelect"
+                        type="month"
+                        value={selectedMonth}
+                        onChange={(e) => setSelectedMonth(e.target.value || currentMonthKey())}
+                        className="month-input"
+                    />
                 </div>
+                <p className="month-filter-note" style={{ marginBottom: 0 }}>
+                    Records below are filtered for {selectedMonthLabel}.
+                </p>
             </div>
         );
     };
@@ -240,44 +208,21 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
         loadAll();
     }, [loadAll]);
 
-    const monthKeyFromLabel = (label) => {
-        // "May 2026" -> "2026-05"
-        if (!label) return "";
-        const [monthNameRaw, yearRaw] = label.split(" ");
-        const year = String(yearRaw || "").trim();
-        const monthName = String(monthNameRaw || "").trim().toLowerCase();
-        const monthMap = {
-            january: "01",
-            february: "02",
-            march: "03",
-            april: "04",
-            may: "05",
-            june: "06",
-            july: "07",
-            august: "08",
-            september: "09",
-            october: "10",
-            november: "11",
-            december: "12",
-        };
-        const mm = monthMap[monthName];
-        if (!year || !mm) return "";
-        return `${year}-${mm}`;
-    };
-
-    const selectedMonthKey = monthKeyFromLabel(selectedMonth);
+    const selectedMonthKey = selectedMonth || currentMonthKey();
+    const monthFilteredSenderEntries = useMemo(
+        () => filterRowsByMonth(senderEntries, selectedMonthKey),
+        [senderEntries, selectedMonthKey]
+    );
+    const monthFilteredReceiverTransactions = useMemo(
+        () => filterRowsByMonth(receiverTransactions, selectedMonthKey),
+        [receiverTransactions, selectedMonthKey]
+    );
 
     const groupedSenders = useMemo(() => {
         const map = new Map();
         const storedContacts = getStoredContacts(SENDER_CONTACTS_STORAGE_KEY);
 
-        senderEntries.forEach((entry) => {
-            // Filter UI by selected month using only transaction.date
-            if (selectedMonthKey) {
-                const dateKey = (entry?.date || "").slice(0, 7);
-                if (dateKey !== selectedMonthKey) return;
-            }
-
+        monthFilteredSenderEntries.forEach((entry) => {
             const name = (entry.name || "").trim();
             if (!name) return;
             const key = normalizeKey(name);
@@ -313,19 +258,13 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
 
         rows.sort((a, b) => (b.lastDate || "").localeCompare(a.lastDate || ""));
         return rows;
-    }, [senderEntries, getStoredContacts, selectedMonthKey]);
+    }, [getStoredContacts, monthFilteredSenderEntries]);
 
     const groupedReceivers = useMemo(() => {
         const txByReceiver = new Map();
 
-        (receiverTransactions || []).forEach((tx) => {
+        monthFilteredReceiverTransactions.forEach((tx) => {
             if (!tx.receiver_id) return;
-
-            // Filter by selected month using tx.date (format: "YYYY-MM-DD")
-            if (selectedMonthKey) {
-                const txMonthKey = (tx.date || "").slice(0, 7);
-                if (txMonthKey !== selectedMonthKey) return;
-            }
 
             if (!txByReceiver.has(tx.receiver_id)) {
                 txByReceiver.set(tx.receiver_id, []);
@@ -390,9 +329,8 @@ export default function MoneyRecordsPage({ user, addToast, updateGlobalBalance }
         return filteredRows;
     }, [
         receiverEntries,
-        receiverTransactions,
         getStoredContacts,
-        selectedMonthKey,
+        monthFilteredReceiverTransactions,
     ]);
 
     const selectedSender = useMemo(() => {

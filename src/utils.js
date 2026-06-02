@@ -21,29 +21,7 @@ export async function fetchFromFirebase(userId) {
   try {
     const userDocRef = doc(db, "users", userId);
     const userDocSnap = await getDoc(userDocRef);
-
-    console.log("USER DOC EXISTS:", userDocSnap.exists());
-    console.log("USER DOC DATA:", userDocSnap.data());
-
-    if (userDocSnap.exists()) {
-      const data = userDocSnap.data();
-
-      if (
-        Array.isArray(data.expenses) ||
-        Array.isArray(data.transactions) ||
-        Array.isArray(data.senders)
-      ) {
-        console.log("OLD DATA FOUND");
-
-        return {
-          expenses: data.expenses || [],
-          transactions: data.transactions || [],
-          receiverTransactions: data.receiver_transactions || [],
-          senders: data.senders || [],
-          lendBorrow: data.lendBorrow || []
-        };
-      }
-    }
+    const legacyData = userDocSnap.exists() ? userDocSnap.data() || {} : {};
     const expQ = query(userCollection(userId, "expenses"), orderBy("date", "desc"));
     const expSnap = await getDocs(expQ);
     const expensesRaw = [];
@@ -74,7 +52,44 @@ export async function fetchFromFirebase(userId) {
     lbSnap.forEach((docSnap) => { lendBorrowRaw.push({ id: docSnap.id, ...docSnap.data() }); });
     const lendBorrow = lendBorrowRaw.filter((item) => !item.userId || item.userId === userId);
 
-    return { expenses, transactions, receiverTransactions, senders, lendBorrow };
+    const hasLiveSubcollectionData =
+      expenses.length > 0 ||
+      transactions.length > 0 ||
+      receiverTransactions.length > 0 ||
+      senders.length > 0 ||
+      lendBorrow.length > 0;
+
+    if (hasLiveSubcollectionData) {
+      console.log("[EXPENSE DEBUG] fetched live subcollection data", {
+        userId,
+        expensesCount: expenses.length,
+        transactionsCount: transactions.length,
+        receiverTransactionsCount: receiverTransactions.length,
+        sendersCount: senders.length,
+        lendBorrowCount: lendBorrow.length,
+      });
+
+      return { expenses, transactions, receiverTransactions, senders, lendBorrow };
+    }
+
+    const fallbackData = {
+      expenses: Array.isArray(legacyData.expenses) ? legacyData.expenses : [],
+      transactions: Array.isArray(legacyData.transactions) ? legacyData.transactions : [],
+      receiverTransactions: Array.isArray(legacyData.receiver_transactions) ? legacyData.receiver_transactions : [],
+      senders: Array.isArray(legacyData.senders) ? legacyData.senders : [],
+      lendBorrow: Array.isArray(legacyData.lendBorrow) ? legacyData.lendBorrow : [],
+    };
+
+    console.log("[EXPENSE DEBUG] falling back to legacy user doc data", {
+      userId,
+      expensesCount: fallbackData.expenses.length,
+      transactionsCount: fallbackData.transactions.length,
+      receiverTransactionsCount: fallbackData.receiverTransactions.length,
+      sendersCount: fallbackData.senders.length,
+      lendBorrowCount: fallbackData.lendBorrow.length,
+    });
+
+    return fallbackData;
   } catch (error) {
     console.error("Error fetching from Firebase:", error);
     return { expenses: [], transactions: [], receiverTransactions: [], senders: [], lendBorrow: [] };
@@ -138,6 +153,9 @@ export function todayISO() {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+export const REMINDERS_STORAGE_KEY = "expensebook_reminders";
+export const REMINDERS_UPDATED_EVENT = "expensebook:reminders-updated";
+
 /** YYYY-MM for current month (local timezone) */
 export function currentMonthKey() {
   const d = new Date();
@@ -160,6 +178,51 @@ export function dateFromMonthKey(monthKey) {
 /** Returns true if YYYY-MM-DD belongs to YYYY-MM */
 export function isISOInMonth(iso, monthKey) {
   return monthKeyFromISO(iso) === monthKey;
+}
+
+export function filterRowsByMonth(rows, monthKey, getDate = (row) => row?.date) {
+  if (!Array.isArray(rows)) return [];
+  if (!monthKey) return rows;
+  return rows.filter((row) => isISOInMonth(getDate(row), monthKey));
+}
+
+export function normalizeEntityKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+export function countUniqueNamedRows(rows, getName = (row) => row?.name) {
+  if (!Array.isArray(rows)) return 0;
+  const unique = new Set();
+
+  rows.forEach((row) => {
+    const normalizedName = normalizeEntityKey(getName(row));
+    if (normalizedName) unique.add(normalizedName);
+  });
+
+  return unique.size;
+}
+
+export function countReceiversWithMonthActivity(receiverRows, receiverTransactions, monthKey) {
+  if (!Array.isArray(receiverRows) || !Array.isArray(receiverTransactions)) return 0;
+
+  const validReceiverIds = new Set(
+    receiverRows
+      .map((row) => (row?.id ? String(row.id) : ""))
+      .filter(Boolean)
+  );
+
+  if (validReceiverIds.size === 0) return 0;
+
+  const activeReceiverIds = new Set();
+
+  filterRowsByMonth(receiverTransactions, monthKey).forEach((row) => {
+    const receiverId = row?.receiver_id ? String(row.receiver_id) : "";
+    if (receiverId && validReceiverIds.has(receiverId)) {
+      activeReceiverIds.add(receiverId);
+    }
+  });
+
+  return activeReceiverIds.size;
 }
 
 /** Ensure every item has a date; fallbackDate can be string or function(item)->string */
@@ -214,6 +277,69 @@ export function computeTotals(senders, transactions, expenses) {
     totalBalance,
     creditFromSenders,
     creditFromTx,
+  };
+}
+
+export function loadStoredReminders() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return [];
+    const raw = window.localStorage.getItem(REMINDERS_STORAGE_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter((item) => item && typeof item === "object");
+  } catch {
+    return [];
+  }
+}
+
+function isReminderCancelled(reminder) {
+  const status = String(reminder?.status || "").trim().toLowerCase();
+  return (
+    reminder?.cancelled === true ||
+    reminder?.canceled === true ||
+    status === "cancelled" ||
+    status === "canceled"
+  );
+}
+
+export function getReminderBudgetSnapshot(reminders, availableBalance = 0) {
+  const safeAvailableBalance = Number(availableBalance) || 0;
+  const today = todayISO();
+
+  const activeReminders = (Array.isArray(reminders) ? reminders : []).filter((reminder) => {
+    if (!reminder || typeof reminder !== "object") return false;
+    if (reminder.completed === true) return false;
+    if (isReminderCancelled(reminder)) return false;
+    return true;
+  });
+
+  let totalUpcomingReminderAmount = 0;
+  let totalDueReminderAmount = 0;
+
+  activeReminders.forEach((reminder) => {
+    const amount = Number(reminder?.amount) || 0;
+    const dueISO = typeof reminder?.dueISO === "string" ? reminder.dueISO : "";
+
+    if (dueISO && dueISO < today) {
+      totalDueReminderAmount += amount;
+      return;
+    }
+
+    totalUpcomingReminderAmount += amount;
+  });
+
+  const totalReminderAmount = totalUpcomingReminderAmount + totalDueReminderAmount;
+  const monthlyBudget = safeAvailableBalance - totalReminderAmount;
+
+  return {
+    totalUpcomingReminderAmount,
+    totalDueReminderAmount,
+    totalReminderAmount,
+    monthlyBudget,
+    activeReminders,
   };
 }
 

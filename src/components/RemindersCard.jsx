@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
     Bell,
     Pencil,
@@ -11,7 +11,16 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 
-import { formatMoney, formatDateDisplay, todayISO } from "../utils.js";
+import {
+    formatMoney,
+    formatDateDisplay,
+    todayISO,
+    currentMonthKey,
+    REMINDERS_STORAGE_KEY,
+    REMINDERS_UPDATED_EVENT,
+} from "../utils.js";
+
+const REMINDERS_MONTH_FILTER_SESSION_KEY = "expensebook_reminders_month_filter";
 
 
 function dueISOFromOffset(offsetDays = 0) {
@@ -29,6 +38,15 @@ function getReminderStatus(item) {
     if (item?.completed) return "Completed";
     if (due && String(due) < today) return "Overdue";
     return "Upcoming";
+}
+
+function formatMonthLabel(monthKey) {
+    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return "selected month";
+    const [year, month] = monthKey.split("-").map(Number);
+    return new Date(year, month - 1, 1).toLocaleDateString("en-US", {
+        month: "long",
+        year: "numeric",
+    });
 }
 
 function statusMeta(status) {
@@ -193,12 +211,10 @@ function RemindersCardItem({ item, onEdit, onDelete, onMarkComplete }) {
 }
 
 export default function RemindersCard({ addToast, requestConfirm }) {
-    const STORAGE_KEY = "expensebook_reminders";
-
     const safeLoadRemindersFromLocalStorage = useCallback(() => {
         try {
             if (typeof window === "undefined" || !window.localStorage) return [];
-            const raw = window.localStorage.getItem(STORAGE_KEY);
+            const raw = window.localStorage.getItem(REMINDERS_STORAGE_KEY);
             if (!raw) return [];
 
             const parsed = JSON.parse(raw);
@@ -351,7 +367,8 @@ export default function RemindersCard({ addToast, requestConfirm }) {
                 }))
                 : [];
 
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
+            window.localStorage.setItem(REMINDERS_STORAGE_KEY, JSON.stringify(serializable));
+            window.dispatchEvent(new Event(REMINDERS_UPDATED_EVENT));
         } catch {
             // Ignore persistence failures.
         }
@@ -365,18 +382,44 @@ export default function RemindersCard({ addToast, requestConfirm }) {
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("All");
     const [sortMode, setSortMode] = useState("Default");
+    const [selectedMonth, setSelectedMonth] = useState(() => {
+        try {
+            if (typeof window === "undefined" || !window.sessionStorage) return currentMonthKey();
+            return window.sessionStorage.getItem(REMINDERS_MONTH_FILTER_SESSION_KEY) || currentMonthKey();
+        } catch {
+            return currentMonthKey();
+        }
+    });
 
     // View mode: keep existing default UX by defaulting to Upcoming only
     // (switch to All Reminders when requested; must not reset search/filter/sort)
     const [viewMode, setViewMode] = useState("Upcoming");
 
     const normalizedSearch = (searchTerm || "").trim().toLowerCase();
+    const monthFilterLabel = useMemo(
+        () => (selectedMonth === "all" ? "All Months" : formatMonthLabel(selectedMonth)),
+        [selectedMonth]
+    );
+
+    useEffect(() => {
+        try {
+            if (typeof window === "undefined" || !window.sessionStorage) return;
+            window.sessionStorage.setItem(REMINDERS_MONTH_FILTER_SESSION_KEY, selectedMonth || currentMonthKey());
+        } catch {
+            // Ignore session persistence failures.
+        }
+    }, [selectedMonth]);
 
 
     const derived = useMemo(() => {
         const today = todayISO();
+        const monthScopedReminders = reminders.filter((r) => {
+            if (selectedMonth === "all") return true;
+            const dueISO = typeof r?.dueISO === "string" ? r.dueISO : "";
+            return dueISO.slice(0, 7) === selectedMonth;
+        });
 
-        const withStatus = reminders.map((r) => ({ ...r, __status: getReminderStatus(r) }));
+        const withStatus = monthScopedReminders.map((r) => ({ ...r, __status: getReminderStatus(r) }));
 
         const filtered = withStatus.filter((r) => {
             // View mode controls which statuses are visible
@@ -441,6 +484,7 @@ export default function RemindersCard({ addToast, requestConfirm }) {
 
         return {
             filteredSorted,
+            hasAnyReminders: reminders.length > 0,
             counts: {
                 overdue,
                 upcoming,
@@ -448,7 +492,7 @@ export default function RemindersCard({ addToast, requestConfirm }) {
                 total: withStatus.length,
             },
         };
-    }, [reminders, normalizedSearch, statusFilter, sortMode]);
+    }, [reminders, normalizedSearch, selectedMonth, sortMode, statusFilter, viewMode]);
 
     // ===== Existing Add reminder modal logic MUST remain unchanged when adding =====
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -741,10 +785,34 @@ export default function RemindersCard({ addToast, requestConfirm }) {
                     <h1 className="reminders-page__title text-3xl font-bold mb-1" style={{ color: "var(--text)" }}>Reminders</h1>
                     <p className="reminders-page__subtitle" style={{ color: "var(--text-muted)" }}>Manage your upcoming payments and reminders</p>
                 </div>
-                <button type="button" className="reminders-page__add-btn px-5 py-2.5 rounded-xl font-medium shadow-sm transition-colors flex items-center gap-2 self-start sm:self-auto" style={{ background: "var(--accent-gradient-strong)", color: "var(--hero-contrast)" }} onClick={handleAddReminder}>
-                    <span className="reminders-page__add-plus text-lg font-semibold" aria-hidden="true">+</span>
-                    Add Reminder
-                </button>
+                <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto sm:items-center sm:justify-end">
+                    <div className="flex items-center gap-2 px-3 h-[48px] rounded-[14px] border w-full sm:w-[240px] flex-shrink-0" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                        <label htmlFor="reminderMonthFilter" className="text-sm font-medium whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
+                            Month
+                        </label>
+                        <input
+                            id="reminderMonthFilter"
+                            type="month"
+                            value={selectedMonth === "all" ? currentMonthKey() : selectedMonth}
+                            onChange={(e) => setSelectedMonth(e.target.value || currentMonthKey())}
+                            aria-label="Month filter"
+                            className="w-full bg-transparent border-none outline-none text-sm cursor-pointer min-w-0"
+                            style={{ color: "var(--text)" }}
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setSelectedMonth("all")}
+                            className="text-xs font-semibold whitespace-nowrap"
+                            style={{ color: selectedMonth === "all" ? "var(--accent)" : "var(--text-muted)" }}
+                        >
+                            All Months
+                        </button>
+                    </div>
+                    <button type="button" className="reminders-page__add-btn px-5 py-2.5 rounded-xl font-medium shadow-sm transition-colors flex items-center justify-center gap-2 w-full sm:w-auto" style={{ background: "var(--accent-gradient-strong)", color: "var(--hero-contrast)" }} onClick={handleAddReminder}>
+                        <span className="reminders-page__add-plus text-lg font-semibold" aria-hidden="true">+</span>
+                        Add Reminder
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -820,8 +888,14 @@ export default function RemindersCard({ addToast, requestConfirm }) {
             {derived.filteredSorted.length === 0 ? (
                 <div className="reminders-card__empty flex flex-col items-center justify-center py-12 text-center">
                     <Bell size={48} style={{ color: "var(--text-muted)" }} className="mb-4" />
-                    <h2 className="text-xl font-semibold mb-2">No Reminders Yet</h2>
-                    <p className="mb-4" style={{ color: "var(--text-muted)" }}>Create reminders for payments, expenses and important events.</p>
+                    <h2 className="text-xl font-semibold mb-2">
+                        {derived.hasAnyReminders ? `No reminders found for ${monthFilterLabel}.` : "No Reminders Yet"}
+                    </h2>
+                    <p className="mb-4" style={{ color: "var(--text-muted)" }}>
+                        {derived.hasAnyReminders
+                            ? `Try another month or adjust your filters to see reminders for ${monthFilterLabel}.`
+                            : "Create reminders for payments, expenses and important events."}
+                    </p>
                     <button type="button" className="btn btn-primary" onClick={handleAddReminder}>+ Add Reminder</button>
                 </div>
             ) : (

@@ -1,5 +1,10 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import ExpenseCalendar, { CalendarDayPanel } from "./ExpenseCalendar.jsx";
+import {
+  getReminderBudgetSnapshot,
+  loadStoredReminders,
+  REMINDERS_UPDATED_EVENT,
+} from "./utils.js";
 
 export default function CalendarPage({
   calMonth,
@@ -10,31 +15,53 @@ export default function CalendarPage({
   onNextMonth,
   onNavigateToReminders,
   monthlyBalance,
-  thisMonthExpenses,
+  totalBalance,
+  netWorth,
 }) {
   const viewMonth = useMemo(() => calMonth, [calMonth]);
+  const [reminders, setReminders] = useState(() => loadStoredReminders());
+
+  useEffect(() => {
+    const refreshReminders = () => {
+      setReminders(loadStoredReminders());
+    };
+
+    refreshReminders();
+
+    if (typeof window === "undefined") return undefined;
+
+    window.addEventListener("storage", refreshReminders);
+    window.addEventListener(REMINDERS_UPDATED_EVENT, refreshReminders);
+
+    return () => {
+      window.removeEventListener("storage", refreshReminders);
+      window.removeEventListener(REMINDERS_UPDATED_EVENT, refreshReminders);
+    };
+  }, []);
+
+  const reminderBudget = useMemo(
+    () => getReminderBudgetSnapshot(reminders, monthlyBalance),
+    [reminders, monthlyBalance]
+  );
 
   // UI-only derived metrics for premium cards (no business logic changes).
   // Reminder count uses the existing reminders localStorage payload (expensebook_reminders)
   // and mirrors the RemindersCard “Upcoming” logic to keep counts synchronized.
   const upcomingRemindersCount = useMemo(() => {
     try {
-      if (typeof window === "undefined" || !window.localStorage) return 0;
-      const STORAGE_KEY = "expensebook_reminders";
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return 0;
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return 0;
-
       const today = new Date();
       // RemindersCard compares dueISO strings to todayISO() which is YYYY-MM-DD.
       const pad2 = (n) => String(n).padStart(2, "0");
       const todayISO = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`;
 
-      return parsed.filter((r) => {
+      return reminders.filter((r) => {
         const reminder = r || {};
+        const cancelled =
+          reminder.cancelled === true ||
+          reminder.canceled === true ||
+          ["cancelled", "canceled"].includes(String(reminder.status || "").trim().toLowerCase());
         const completed = typeof reminder.completed === "boolean" ? reminder.completed : false;
-        if (completed) return false;
+        if (completed || cancelled) return false;
 
         const dueISO = typeof reminder.dueISO === "string" ? reminder.dueISO : "";
         // Count if due date is today or in the future OR due date is missing (treated as Upcoming in RemindersCard).
@@ -44,7 +71,16 @@ export default function CalendarPage({
     } catch {
       return 0;
     }
-  }, []);
+  }, [reminders]);
+
+  useEffect(() => {
+    console.log("Monthly Balance Source:", Number(monthlyBalance) || 0);
+    console.log("Total Balance:", Number(totalBalance) || 0);
+    console.log("Net Worth:", Number(netWorth) || 0);
+    console.log("Reminder Amount:", Number(reminderBudget.totalReminderAmount) || 0);
+    console.log("Monthly Budget:", Number(reminderBudget.monthlyBudget) || 0);
+  }, [monthlyBalance, totalBalance, netWorth, reminderBudget]);
+
   const thisMonthExpenseTotal = useMemo(() => {
     if (!Array.isArray(expenses)) return 0;
     const y = viewMonth?.getFullYear?.();
@@ -225,7 +261,7 @@ export default function CalendarPage({
             <div className="calendar-summary-card__icon" aria-hidden="true">🎯</div>
             <div className="calendar-summary-card__copy">
               <div className="calendar-summary-card__label">Monthly Budget</div>
-              <div className="calendar-summary-card__value">{(Number(monthlyBalance) - Number(thisMonthExpenses)).toFixed(2)}</div>
+              <div className="calendar-summary-card__value">{Number(reminderBudget.monthlyBudget).toFixed(2)}</div>
               <div className="calendar-summary-card__desc">Planned budget vs remaining</div>
             </div>
           </article>

@@ -33,6 +33,9 @@ import {
   fetchFromFirebase,
   clearFirebaseData,
   computeTotals,
+  countReceiversWithMonthActivity,
+  countUniqueNamedRows,
+  filterRowsByMonth,
   formatMoney,
   formatDateDisplay,
   initialData,
@@ -144,36 +147,6 @@ function firstDateOfMonth(monthKey) {
   return `${monthKey}-01`;
 }
 
-function normalizeMetricKey(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function getUniqueSenderCount(senderRows) {
-  const unique = new Set();
-
-  // Count unique sender *names* only. Do not fall back to `id` because
-  // transaction entries without a `name` would otherwise be treated as
-  // distinct senders (inflating the count). This mirrors the UI which
-  // groups senders by name when rendering sender cards.
-  senderRows.forEach((row) => {
-    const name = row && row.name ? normalizeMetricKey(row.name) : "";
-    if (name) unique.add(name);
-  });
-
-  return unique.size;
-}
-
-function getUniqueReceiverCount(receiverRows) {
-  // Receivers are stored as distinct documents; count unique receiver
-  // documents by id. If `receiverRows` is not an array, return 0.
-  if (!Array.isArray(receiverRows)) return 0;
-  const unique = new Set();
-  receiverRows.forEach((row) => {
-    if (row && row.id) unique.add(String(row.id));
-  });
-  return unique.size;
-}
-
 function getMonthlyReceivedTotal(senderRows, monthKey) {
   // Sum only real sender payment entries for the month. Exclude entries
   // that don't have a sender `name` and ignore obvious top-up/recharge
@@ -189,6 +162,28 @@ function getMonthlyReceivedTotal(senderRows, monthKey) {
     if (amount <= 0) return sum;
     return sum + amount;
   }, 0);
+}
+
+function getPendingLendBorrowTotals(records, userId) {
+  let totalLentPending = 0;
+  let totalBorrowPending = 0;
+
+  (Array.isArray(records) ? records : []).forEach((row) => {
+    if (!row) return;
+    if (row.userId && row.userId !== userId) return;
+
+    const amount = Number(row.amount) || 0;
+    const repaid = Array.isArray(row.repayments)
+      ? row.repayments.reduce((sum, repayment) => sum + (Number(repayment?.amount) || 0), 0)
+      : 0;
+    const remaining = amount - repaid;
+
+    if (remaining <= 0) return;
+    if (row.type === "lend") totalLentPending += remaining;
+    if (row.type === "borrow") totalBorrowPending += remaining;
+  });
+
+  return { totalLentPending, totalBorrowPending };
 }
 
 const NOTIFICATIONS_STORAGE_KEY = "expensepr_notifications";
@@ -371,20 +366,7 @@ export default function App() {
 
   const [receiverTransactions, setReceiverTransactions] = useState([]);
   const [receivers, setReceivers] = useState([]);
-
-  const [globalMetrics, setGlobalMetrics] = useState({
-    globalBalance: 0,
-    totalLentPending: 0,
-    totalBorrowPending: 0,
-    netWorth: 0,
-    totalSentMoney: 0,
-    totalReceivers: 0,
-    thisMonthSent: 0,
-    remainingBalance: 0,
-    totalSenderMoney: 0,
-    thisMonthReceived: 0,
-    totalSenders: 0
-  });
+  const [lendBorrowRecords, setLendBorrowRecords] = useState([]);
 
   const [balanceInput, setBalanceInput] = useState("");
 
@@ -646,53 +628,71 @@ export default function App() {
   const selectedMonthLabel = useMemo(() => formatMonthYear(calMonth), [calMonth]);
 
   const visibleMonthTransactions = useMemo(
-    () => transactions.filter((tx) => isISOInMonth(tx.date, selectedMonth)),
+    () => filterRowsByMonth(transactions, selectedMonth),
     [transactions, selectedMonth]
   );
 
   const visibleMonthExpenses = useMemo(
-    () => expenses.filter((e) => isISOInMonth(e.date, selectedMonth)),
+    () => filterRowsByMonth(expenses, selectedMonth),
     [expenses, selectedMonth]
   );
 
   const visibleMonthReceiverTransactions = useMemo(
-    () => receiverTransactions.filter((rt) => isISOInMonth(rt.date, selectedMonth)),
+    () => filterRowsByMonth(receiverTransactions, selectedMonth),
     [receiverTransactions, selectedMonth]
   );
 
   const visibleMonthSenders = useMemo(
-    () => senders.filter((sender) => isISOInMonth(sender.date, selectedMonth)),
+    () => filterRowsByMonth(senders, selectedMonth),
     [senders, selectedMonth]
   );
 
-  // Update dashboard counters to reflect month selection
-  useEffect(() => {
-    // Count unique senders present in the selected month
-    const totalSendersMonth = getUniqueSenderCount(visibleMonthSenders);
-    // Count unique receivers that have transactions in the selected month
-    const receiverIds = new Set(visibleMonthReceiverTransactions.map((rt) => rt.id));
-    const totalReceiversMonth = receiverIds.size;
-    // Sum of amounts sent this month (receiver transactions are treated as debits)
+  const globalMetrics = useMemo(() => {
+    const receiverAsDebits = receiverTransactions.map((row) => ({
+      id: row.id,
+      name: row.name || "Receiver Transaction",
+      type: "Debit",
+      amount: Number(row.amount) || 0,
+      date: row.date,
+    }));
+
+    const totals = computeTotals(senders, [...transactions, ...receiverAsDebits], expenses);
+    const { totalLentPending, totalBorrowPending } = getPendingLendBorrowTotals(
+      lendBorrowRecords,
+      user?.uid
+    );
     const thisMonthSent = visibleMonthReceiverTransactions.reduce(
-      (sum, rt) => sum + (Number(rt.amount) || 0),
+      (sum, row) => sum + (Number(row.amount) || 0),
       0
     );
-    // Sum of amounts received this month (credits from sender transactions)
-    const thisMonthReceived = visibleMonthTransactions.reduce((sum, tx) => {
-      if (!tx) return sum;
-      if (tx.type !== "Credit") return sum;
+    const thisMonthReceived = getMonthlyReceivedTotal(senders, selectedMonth);
+    const remainingBalance = Number(totals.totalBalance) || 0;
 
-      const amt = Number(tx.amount) || 0;
-      return amt > 0 ? sum + amt : sum;
-    }, 0);
-    setGlobalMetrics((prev) => ({
-      ...prev,
-      totalSenders: totalSendersMonth,
-      totalReceivers: totalReceiversMonth,
+    return {
+      globalBalance: remainingBalance,
+      totalLentPending,
+      totalBorrowPending,
+      netWorth: remainingBalance + totalLentPending - totalBorrowPending,
+      totalSentMoney: thisMonthSent,
+      totalReceivers: countReceiversWithMonthActivity(receivers, receiverTransactions, selectedMonth),
       thisMonthSent,
+      remainingBalance,
+      totalSenderMoney: thisMonthReceived,
       thisMonthReceived,
-    }));
-  }, [visibleMonthSenders, visibleMonthReceiverTransactions, selectedMonth]);
+      totalSenders: countUniqueNamedRows(visibleMonthSenders),
+    };
+  }, [
+    expenses,
+    lendBorrowRecords,
+    receiverTransactions,
+    receivers,
+    selectedMonth,
+    senders,
+    transactions,
+    user?.uid,
+    visibleMonthSenders,
+    visibleMonthReceiverTransactions,
+  ]);
 
   const todayStr = useMemo(() => todayISO(), []);
   const yesterdayStr = useMemo(() => {
@@ -737,6 +737,21 @@ export default function App() {
     if (totalCredit <= 0) return 0;
     return Math.round((totalBalance / totalCredit) * 100);
   }, [monthlyTotals]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    console.log("[EXPENSE DEBUG] dashboard received expense data", {
+      userId: user.uid,
+      selectedMonth,
+      expensesCount: expenses.length,
+      visibleMonthExpensesCount: visibleMonthExpenses.length,
+      monthlyExpenseTotal: Number(monthlyTotals.totalExpenses) || 0,
+      monthlyBalance: Number(monthlyTotals.totalBalance) || 0,
+      totalSenders: globalMetrics.totalSenders,
+      totalReceivers: globalMetrics.totalReceivers,
+    });
+  }, [user?.uid, selectedMonth, expenses, visibleMonthExpenses, monthlyTotals, globalMetrics]);
 
   const recentItems = useMemo(() => {
     // Keep this deterministic and always based on current month arrays.
@@ -790,28 +805,16 @@ export default function App() {
   const updateGlobalBalanceRequestId = useMemo(() => ({ current: 0 }), []);
 
   const updateGlobalBalance = useCallback(async () => {
-    if (!user) {
-      console.log('[DIAGNOSTIC] updateGlobalBalance: No user, skipping');
-      return;
-    }
+    if (!user) return;
 
     // Increment request ID to track this specific call
     const requestId = ++updateGlobalBalanceRequestId.current;
-    console.log('[DIAGNOSTIC] updateGlobalBalance: Starting request #', requestId, 'for user', user.uid);
 
     try {
-      // Use the same cloud payload that drives dashboard lists to keep UI consistent.
       const cloudData = await fetchFromFirebase(user.uid);
-      console.log('[DIAGNOSTIC] updateGlobalBalance: Firebase response for request #', requestId, {
-        sendersCount: cloudData?.senders?.length || 0,
-        transactionsCount: cloudData?.transactions?.length || 0,
-        expensesCount: cloudData?.expenses?.length || 0,
-        receiverTransactionsCount: cloudData?.receiverTransactions?.length || 0
-      });
 
       // If a newer request was made, ignore this stale response
       if (requestId !== updateGlobalBalanceRequestId.current) {
-        console.log('[DIAGNOSTIC] updateGlobalBalance: Request #', requestId, 'cancelled due to newer request');
         return;
       }
 
@@ -819,104 +822,17 @@ export default function App() {
       const ex = Array.isArray(cloudData?.expenses) ? cloudData.expenses : [];
       const rt = Array.isArray(cloudData?.receiverTransactions) ? cloudData.receiverTransactions : [];
       const senderRows = Array.isArray(cloudData?.senders) ? cloudData.senders : [];
+      const lendBorrowRows = Array.isArray(cloudData?.lendBorrow) ? cloudData.lendBorrow : [];
       const receiverRows = await loadRawReceivers(user.uid);
 
-      // Stage state first so any downstream renders use the newest dataset.
       setSenders(senderRows);
       setReceivers(receiverRows);
       setTransactions(tx);
       setExpenses(ex);
       setReceiverTransactions(rt);
-
-      // Receiver transactions are money sent out => treat them as DEBIT.
-      const rtAsDebits = rt.map((r) => ({
-        id: r.id,
-        name: r.name || "Receiver Transaction",
-        type: "Debit",
-        amount: Number(r.amount) || 0,
-        date: r.date,
-      }));
-
-      const totals = computeTotals(
-        senderRows,
-        [...tx, ...rtAsDebits],
-        ex
-      );
-
-      // Reconnect pending sender/receiver + monthly aggregation cards to shared state.
-      // IMPORTANT: Pending Lent/Borrowed must come from lendBorrow state (remaining = amount - sum(repayments)).
-
-      const monthKey = currentMonthKey();
-      const monthTx = tx.filter((t) => isISOInMonth(t.date, monthKey));
-      const monthRt = rt.filter((r) => isISOInMonth(r.date, monthKey));
-
-      const totalSenders = getUniqueSenderCount(senderRows);
-      const totalReceivers = getUniqueReceiverCount(receiverRows);
-
-      // Pending totals from lendBorrow records (match LendBorrowPage aggregation)
-      let totalLentPending = 0;
-      let totalBorrowPending = 0;
-      try {
-        const lbSnap = await getDocs(collection(db, "users", user.uid, "lendBorrow"));
-        const recordsRaw = [];
-        lbSnap.forEach((d) => recordsRaw.push({ id: d.id, ...d.data() }));
-        const records = recordsRaw.filter((item) => !item.userId || item.userId === user.uid);
-
-        records.forEach((r) => {
-          const amt = Number(r.amount) || 0;
-          const repaid = Array.isArray(r.repayments)
-            ? r.repayments.reduce((s, rep) => s + (Number(rep?.amount) || 0), 0)
-            : 0;
-          const remaining = amt - repaid;
-          if (remaining <= 0) return;
-
-          if (r.type === "lend") totalLentPending += remaining;
-          if (r.type === "borrow") totalBorrowPending += remaining;
-        });
-      } catch (e) {
-        console.error("Failed to compute lend/borrow pending metrics from lendBorrow", e);
-      }
-
-      const thisMonthSent = monthRt.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
-      const thisMonthReceived = getMonthlyReceivedTotal(senderRows, monthKey);
-
-      // Net Worth formula:
-      // Net Worth = Available Balance + Total Lent - Borrowed Money
-      // Use: remainingBalance or availableBalance, totalLentPending, totalBorrowPending
-      const remainingBalance = Number(totals?.totalBalance) || 0;
-      const netWorth =
-        remainingBalance + Number(totalLentPending || 0) - Number(totalBorrowPending || 0);
-
-      console.log('[DIAGNOSTIC] updateGlobalBalance: Setting globalMetrics for request #', requestId, {
-        globalBalance: totals.totalBalance,
-        netWorth,
-        totalLentPending,
-        totalBorrowPending,
-        totalSentMoney: thisMonthSent,
-        totalReceivers,
-        thisMonthSent,
-        remainingBalance: totals.totalBalance,
-        totalSenderMoney: thisMonthReceived,
-        thisMonthReceived,
-        totalSenders
-      });
-
-      setGlobalMetrics((prev) => ({
-        ...prev,
-        globalBalance: totals.totalBalance,
-        netWorth,
-        totalLentPending,
-        totalBorrowPending,
-        totalSentMoney: thisMonthSent,
-        totalReceivers,
-        thisMonthSent,
-        remainingBalance: totals.totalBalance,
-        totalSenderMoney: thisMonthReceived,
-        thisMonthReceived,
-        totalSenders,
-      }));
+      setLendBorrowRecords(lendBorrowRows);
     } catch (error) {
-      console.error("[DIAGNOSTIC] Error updating global balance:", error);
+      console.error("Error updating dashboard data:", error);
     }
   }, [user, loadRawReceivers]);
 
@@ -926,40 +842,19 @@ export default function App() {
     let cancelled = false;
 
     async function loadData() {
-      console.log('[DIAGNOSTIC] loadData: user =', user?.uid || 'null', 'cancelled =', cancelled);
       if (!user) {
-        console.log('[DIAGNOSTIC] loadData: No user, resetting all state to empty');
         setSenders([]);
         setReceivers([]);
         setTransactions([]);
         setExpenses([]);
         setReceiverTransactions([]);
-        setGlobalMetrics({
-          globalBalance: 0,
-          totalLentPending: 0,
-          totalBorrowPending: 0,
-          netWorth: 0,
-          totalSentMoney: 0,
-          totalReceivers: 0,
-          thisMonthSent: 0,
-          remainingBalance: 0,
-          totalSenders: 0,
-          thisMonthReceived: 0
-        });
+        setLendBorrowRecords([]);
         return;
       }
 
       try {
-        console.log('[DIAGNOSTIC] loadData: Fetching from Firebase for user', user.uid);
         const cloudData = await fetchFromFirebase(user.uid);
-        console.log('[DIAGNOSTIC] loadData: Firebase response:', {
-          sendersCount: cloudData?.senders?.length || 0,
-          transactionsCount: cloudData?.transactions?.length || 0,
-          expensesCount: cloudData?.expenses?.length || 0,
-          receiverTransactionsCount: cloudData?.receiverTransactions?.length || 0
-        });
         if (cancelled) {
-          console.log('[DIAGNOSTIC] loadData: Request was cancelled, ignoring response');
           return;
         }
         if (cloudData) {
@@ -968,108 +863,17 @@ export default function App() {
           const transactionsData = cloudData.transactions || [];
           const expensesData = cloudData.expenses || [];
           const receiverTransactionsData = cloudData.receiverTransactions || [];
-
-          console.log('[DIAGNOSTIC] loadData: Setting state with:', {
-            sendersCount: sendersData.length,
-            receiversCount: receiversData.length,
-            transactionsCount: transactionsData.length,
-            expensesCount: expensesData.length,
-            receiverTransactionsCount: receiverTransactionsData.length
-          });
+          const lendBorrowData = Array.isArray(cloudData.lendBorrow) ? cloudData.lendBorrow : [];
 
           setSenders(sendersData);
           setReceivers(receiversData);
           setTransactions(transactionsData);
           setExpenses(expensesData);
           setReceiverTransactions(receiverTransactionsData);
-
-          // Calculate and set globalMetrics from fetched data
-          console.log('[DIAGNOSTIC] loadData: Calculating globalMetrics from fetched data...');
-
-          // Receiver transactions are money sent out => treat them as DEBIT.
-          const rtAsDebits = receiverTransactionsData.map((r) => ({
-            id: r.id,
-            name: r.name || "Receiver Transaction",
-            type: "Debit",
-            amount: Number(r.amount) || 0,
-            date: r.date,
-          }));
-
-          const totals = computeTotals(
-            sendersData,
-            [...transactionsData, ...rtAsDebits],
-            expensesData
-          );
-
-          const monthKey = currentMonthKey();
-
-          const totalSenders = getUniqueSenderCount(sendersData);
-          const totalReceivers = getUniqueReceiverCount(receiversData);
-
-          // Pending totals from lendBorrow records
-          let totalLentPending = 0;
-          let totalBorrowPending = 0;
-          try {
-            const lbSnap = await getDocs(collection(db, "users", user.uid, "lendBorrow"));
-            const recordsRaw = [];
-            lbSnap.forEach((d) => recordsRaw.push({ id: d.id, ...d.data() }));
-            const records = recordsRaw.filter((item) => !item.userId || item.userId === user.uid);
-
-            records.forEach((r) => {
-              const amt = Number(r.amount) || 0;
-              const repaid = Array.isArray(r.repayments)
-                ? r.repayments.reduce((s, rep) => s + (Number(rep?.amount) || 0), 0)
-                : 0;
-              const remaining = amt - repaid;
-              if (remaining <= 0) return;
-
-              if (r.type === "lend") totalLentPending += remaining;
-              if (r.type === "borrow") totalBorrowPending += remaining;
-            });
-          } catch (e) {
-            console.error("Failed to compute lend/borrow pending metrics from lendBorrow", e);
-          }
-
-          const monthRt = receiverTransactionsData.filter((r) => isISOInMonth(r.date, monthKey));
-          const thisMonthSent = monthRt.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
-          const thisMonthReceived = getMonthlyReceivedTotal(sendersData, monthKey);
-
-          const remainingBalance = Number(totals?.totalBalance) || 0;
-          const netWorth =
-            remainingBalance + Number(totalLentPending || 0) - Number(totalBorrowPending || 0);
-
-          console.log('[DIAGNOSTIC] loadData: Setting globalMetrics:', {
-            globalBalance: totals.totalBalance,
-            netWorth,
-            totalLentPending,
-            totalBorrowPending,
-            totalSentMoney: thisMonthSent,
-            totalReceivers,
-            thisMonthSent,
-            remainingBalance: totals.totalBalance,
-            totalSenderMoney: thisMonthReceived,
-            thisMonthReceived,
-            totalSenders
-          });
-
-          setGlobalMetrics({
-            globalBalance: totals.totalBalance,
-            netWorth,
-            totalLentPending,
-            totalBorrowPending,
-            totalSentMoney: thisMonthSent,
-            totalReceivers,
-            thisMonthSent,
-            remainingBalance: totals.totalBalance,
-            totalSenderMoney: thisMonthReceived,
-            thisMonthReceived,
-            totalSenders,
-          });
-
-          console.log('[DIAGNOSTIC] loadData: Complete - state and metrics updated');
+          setLendBorrowRecords(lendBorrowData);
         }
       } catch (error) {
-        console.error("[DIAGNOSTIC] Error syncing with cloud:", error);
+        console.error("Error syncing with cloud:", error);
       }
     }
 
@@ -1156,11 +960,18 @@ export default function App() {
 
       if (user) {
         try {
-          await saveToFirebase(user.uid, "expenses", {
+          const savedExpenseId = await saveToFirebase(user.uid, "expenses", {
             name,
             amount: amt,
             date: expenseDate || todayISO(),
             createdAt: new Date().toISOString()
+          });
+          console.log("[EXPENSE DEBUG] expense saved", {
+            userId: user.uid,
+            expenseId: savedExpenseId,
+            name,
+            amount: amt,
+            date: expenseDate || todayISO(),
           });
           await updateGlobalBalance();
           addToast("Expense added successfully", "success");
@@ -1458,7 +1269,8 @@ export default function App() {
             onPrevMonth={() => setSelectedMonth((monthKey) => shiftMonthKey(monthKey, -1))}
             onNextMonth={() => setSelectedMonth((monthKey) => shiftMonthKey(monthKey, 1))}
             monthlyBalance={Number(monthlyTotals.totalBalance) || 0}
-            thisMonthExpenses={Number(monthlyTotals.totalExpenses) || 0}
+            totalBalance={Number(globalMetrics.globalBalance) || 0}
+            netWorth={Number(globalMetrics.netWorth) || 0}
             onNavigateToReminders={() => setRoute("/reminders")}
           />
         ) : activeNav === "transactions" ? (
@@ -1514,6 +1326,9 @@ export default function App() {
             user={user}
             addToast={addToast}
             updateGlobalBalance={updateGlobalBalance}
+            selectedMonth={selectedMonth}
+            selectedMonthLabel={selectedMonthLabel}
+            setSelectedMonth={setSelectedMonth}
             globalMetrics={globalMetrics}
             onNavigate={setRoute}
           />
@@ -1521,7 +1336,7 @@ export default function App() {
           <>
             <header className="main-header">
               <div className="main-header__greeting">
-                <span className="greeting-prefix">Welcome back,testing</span>
+                <span className="greeting-prefix">Welcome back,</span>
                 <span className="user-name">
                   <span className="user-name__text">{stableUserName}</span>
                   <span className="user-name__wave" aria-hidden="true">👋</span>
@@ -1694,58 +1509,6 @@ export default function App() {
                 </article>
               </div>
 
-              <div className="summary-grid" style={{ marginBottom: '2rem' }}>
-                <article className="card card--summary">
-                  <div className="card__summary-illustration" aria-hidden="true">
-                    <DashboardSummaryIllustration variant="senders" />
-                  </div>
-                  <div className="card__icon" style={{ backgroundColor: 'var(--icon-info-bg)', color: 'var(--icon-info)' }}>
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
-                    </svg>
-                  </div>
-                  <h3 className="card__label">Total Senders</h3>
-                  <p className="card__value">{globalMetrics.totalSenders}</p>
-                </article>
-                <article className="card card--summary">
-                  <div className="card__summary-illustration" aria-hidden="true">
-                    <DashboardSummaryIllustration variant="receivers" />
-                  </div>
-                  <div className="card__icon" style={{ backgroundColor: 'var(--icon-violet-bg)', color: 'var(--icon-violet)' }}>
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" />
-                      <path d="M2 22c0-5.5 4.5-10 10-10s10 4.5 10 10" />
-                    </svg>
-                  </div>
-                  <h3 className="card__label">Total Receivers</h3>
-                  <p className="card__value">{globalMetrics.totalReceivers}</p>
-                </article>
-                <article className="card card--summary">
-                  <div className="card__summary-illustration" aria-hidden="true">
-                    <DashboardSummaryIllustration variant="sent" />
-                  </div>
-                  <div className="card__icon" style={{ backgroundColor: 'var(--icon-success-bg)', color: 'var(--icon-success)' }}>
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M3 17h18M16 7l5 5-5 5M2 12h6" />
-                    </svg>
-                  </div>
-                  <h3 className="card__label">This Month Sent</h3>
-                  <p className="card__value">{formatMoney(globalMetrics.thisMonthSent)}</p>
-                </article>
-                <article className="card card--summary">
-                  <div className="card__summary-illustration" aria-hidden="true">
-                    <DashboardSummaryIllustration variant="received" />
-                  </div>
-                  <div className="card__icon" style={{ backgroundColor: 'var(--icon-success-bg)', color: 'var(--icon-success)' }}>
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12"></polyline>
-                    </svg>
-                  </div>
-                  <h3 className="card__label">This Month Total Received</h3>
-                  <p className="card__value">{formatMoney(globalMetrics.thisMonthReceived)}</p>
-                </article>
-              </div>
-
               <div className="card month-filter-card">
                 <div className="month-filter-row">
                   <label htmlFor="monthSelect" className="month-filter-label">
@@ -1766,64 +1529,44 @@ export default function App() {
 
               <article className="card monthly-summary-card">
                 <h3 className="card__heading">Monthly summary ({selectedMonthLabel})</h3>
+                <div className="monthly-summary-grid monthly-summary-grid--primary">
+                  <div className="monthly-summary-metric">
+                    <span className="monthly-summary-metric__label">Balance</span>
+                    <strong className="monthly-summary-metric__value">{formatMoney(monthlyTotals.totalBalance)}</strong>
+                  </div>
+                  <div className="monthly-summary-metric">
+                    <span className="monthly-summary-metric__label">Credit</span>
+                    <strong className="monthly-summary-metric__value card__value--credit">{formatMoney(monthlyTotals.totalCredit)}</strong>
+                  </div>
+                  <div className="monthly-summary-metric">
+                    <span className="monthly-summary-metric__label">Debit</span>
+                    <strong className="monthly-summary-metric__value card__value--debit">{formatMoney(monthlyTotals.totalDebit)}</strong>
+                  </div>
+                  <div className="monthly-summary-metric">
+                    <span className="monthly-summary-metric__label">Expenses</span>
+                    <strong className="monthly-summary-metric__value">{formatMoney(monthlyTotals.totalExpenses)}</strong>
+                  </div>
+                </div>
+                <div className="monthly-summary-divider" aria-hidden="true" />
                 <div className="monthly-summary-grid">
-                  <p>
-                    Balance <strong>{formatMoney(monthlyTotals.totalBalance)}</strong>
-                  </p>
-                  <p>
-                    Credit <strong className="card__value--credit">{formatMoney(monthlyTotals.totalCredit)}</strong>
-                  </p>
-                  <p>
-                    Debit <strong className="card__value--debit">{formatMoney(monthlyTotals.totalDebit)}</strong>
-                  </p>
+                  <div className="monthly-summary-metric">
+                    <span className="monthly-summary-metric__label">Total Senders</span>
+                    <strong className="monthly-summary-metric__value">{globalMetrics.totalSenders}</strong>
+                  </div>
+                  <div className="monthly-summary-metric">
+                    <span className="monthly-summary-metric__label">Total Receivers</span>
+                    <strong className="monthly-summary-metric__value">{globalMetrics.totalReceivers}</strong>
+                  </div>
+                  <div className="monthly-summary-metric">
+                    <span className="monthly-summary-metric__label">Total Sent</span>
+                    <strong className="monthly-summary-metric__value">{formatMoney(globalMetrics.thisMonthSent)}</strong>
+                  </div>
+                  <div className="monthly-summary-metric">
+                    <span className="monthly-summary-metric__label">Total Received</span>
+                    <strong className="monthly-summary-metric__value">{formatMoney(globalMetrics.thisMonthReceived)}</strong>
+                  </div>
                 </div>
               </article>
-
-
-
-              <div className="summary-grid" style={{ marginTop: 0 }}>
-                <article className="card card--summary card--highlight">
-
-                  <div className="card__icon card__icon--balance">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                    </svg>
-                  </div>
-                  <h3 className="card__label">Monthly balance</h3>
-                  <p className="card__value">{formatMoney(monthlyTotals.totalBalance)}</p>
-                  <p className="card__hint">Credit - Debit</p>
-                </article>
-                <article className="card card--summary">
-                  <div className="card__icon card__icon--credit">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-                      <polyline points="17 6 23 6 23 12" />
-                    </svg>
-                  </div>
-                  <h3 className="card__label">Monthly credit</h3>
-                  <p className="card__value card__value--credit">{formatMoney(monthlyTotals.totalCredit)}</p>
-                </article>
-                <article className="card card--summary">
-                  <div className="card__icon card__icon--debit">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="23 18 13.5 8.5 8.5 13.5 1 6" />
-                      <polyline points="17 18 23 18 23 12" />
-                    </svg>
-                  </div>
-                  <h3 className="card__label">Monthly debit</h3>
-                  <p className="card__value card__value--debit">{formatMoney(monthlyTotals.totalDebit)}</p>
-                </article>
-                <article className="card card--summary">
-                  <div className="card__icon card__icon--expense">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="1" y="4" width="22" height="16" rx="2" />
-                      <line x1="1" y1="10" x2="23" y2="10" />
-                    </svg>
-                  </div>
-                  <h3 className="card__label">Monthly expenses</h3>
-                  <p className="card__value">{formatMoney(monthlyTotals.totalExpenses)}</p>
-                </article>
-              </div>
 
               <div className="dashboard-row">
                 <div className="card card--chart">
